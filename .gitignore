@@ -1,0 +1,38 @@
+# Gradle
+.gradle/
+.gradle-home/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# 运行目录（runClient / runServer 的工作目录，含存档与日志）
+run/
+runs/
+
+# 第三方源码参考：BD 与 ProjectE 的完整源码树
+# 不纳入本仓库 —— 它们是第三方项目（各有自己的 .git），体积大，且会让克隆变得很慢。
+# 需要时按 docs/VERSIONS.md 自行 clone 到 reference/ 下即可。
+reference/
+
+# 前置模组的二进制（见 libs/README.md）
+# 不重新分发第三方 jar；缺失时构建会自动回退到 CurseMaven 坐标
+libs/*.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+bin/
+
+# 杂项
+*.log
+*.tmp
+.DS_Store
+
+# 编译产物
+*.class
+out/

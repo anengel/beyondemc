@@ -1,0 +1,5 @@
+{
+  "types.beyondemc.emc_type.name": "EMC",
+  "types.beyondemc.emc_amount": "Stored: %s EMC",
+  "types.beyondemc.emc_hint": "Deposit EMC-valued items to fill this up"
+}

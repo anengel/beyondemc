@@ -1,0 +1,13 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    // 让 Gradle 能在需要时自动下载匹配的 JDK（用于 java.toolchain）。
+    // 版本 1.0.0：与 Beyond Dimensions 一致（0.8.0 在 Gradle 9 下未必可用）。
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'beyondemc'

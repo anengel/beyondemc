@@ -1,0 +1,64 @@
+# Beyond EMC —— neoforge.mods.toml 模板
+# ${} 占位符由 build.gradle 的 generateModMetadata 任务从 gradle.properties 展开
+
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+description='''${mod_description}'''
+# 图标：文件位于 jar 根（src/main/resources/beyondemc.png），在 Mods 列表里显示
+logoFile="beyondemc.png"
+
+# ============ 发布前待填（需要你的仓库 / 项目地址）============
+# 取消注释并填入实际地址即可。这三项都是可选的，但发布平台上通常会要求 issueTrackerURL。
+# issueTrackerURL="https://github.com/<你>/<仓库>/issues"
+# displayURL="https://github.com/<你>/<仓库>"
+# updateJSONURL="https://raw.githubusercontent.com/<你>/<仓库>/main/update.json"
+
+# ============ Mixin ============
+# 1.21.1 下该块只支持 config 一个键
+# （requiredMods / behaviorVersion 是更晚的 NeoForge 才加入的）
+[[mixins]]
+config="${mod_id}.mixins.json"
+
+# ============ 依赖 ============
+# ordering="AFTER" 对 beyonddimensions / projecte 是必需的：
+# 我们会对它们的类做 Mixin，目标类必须先存在于类路径上。
+
+[[dependencies.${mod_id}]]
+modId="neoforge"
+type="required"
+versionRange="${neo_version_range}"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
+modId="minecraft"
+type="required"
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"
+
+# 超越维度 Beyond Dimensions（0.7.30 基线）
+[[dependencies.${mod_id}]]
+modId="beyonddimensions"
+type="required"
+versionRange="[0.7.30,)"
+ordering="AFTER"
+side="BOTH"
+
+# 等价交换 ProjectE（1.1.0 基线）
+[[dependencies.${mod_id}]]
+modId="projecte"
+type="required"
+versionRange="[1.1.0,)"
+ordering="AFTER"
+side="BOTH"
+
+[features.${mod_id}]
+javaVersion="[21,)"
