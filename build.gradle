@@ -119,10 +119,18 @@ dependencies {
     //   libs/jei-1.21.1-neoforge-<版本>.jar 是本地副本，tools/install-to-mods.cmd 会一并装上。
     // ------------------------------------------------------------
     def jeiJar = file("libs/jei-1.21.1-neoforge-${jei_version}.jar")
-    if (jeiJar.exists()) {
-        compileOnly files(jeiJar)
-    } else {
-        compileOnly "mezz.jei:jei-1.21.1-neoforge:${jei_version}"
+    compileOnly(jeiJar.exists()
+            ? files(jeiJar)
+            : "mezz.jei:jei-1.21.1-neoforge:${jei_version}")
+
+    // 但**测试**时它必须真在 run 里，否则 JEI 集成无从验证。
+    // 用 -PwithJei 显式开关（tools/play.cmd 会带上），这样 runServer / 自检
+    // 的类路径保持干净 —— 客户端专用模组不该进专用服务器。
+    if (providers.gradleProperty('withJei').isPresent()) {
+        runtimeOnly(jeiJar.exists()
+                ? files(jeiJar)
+                : "mezz.jei:jei-1.21.1-neoforge:${jei_version}")
+        logger.lifecycle("[BeyondEMC] withJei 已启用：JEI ${jei_version} 会进入 run 类路径")
     }
 }
 

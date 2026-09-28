@@ -8,6 +8,10 @@ REM  From a terminal you can pass another Gradle task:
 REM      tools\play.cmd runServer
 REM      tools\play.cmd build
 REM
+REM  JEI is put on the run classpath by default (-PwithJei) so the JEI
+REM  integration can be tested in the dev client. Pass "nojei" as the
+REM  second argument to turn that off:  tools\play.cmd runClient nojei
+REM
 REM  Why the window stays open at the end: if something fails you
 REM  need to be able to read the error. Without "pause" this window
 REM  closes instantly on failure and you see nothing.
@@ -31,6 +35,10 @@ cd /d "%~dp0.."
 
 if "%~1"=="" (set "TASK=runClient") else (set "TASK=%~1")
 
+REM JEI on the run classpath (needed to test the JEI recipe-fill feature).
+set "JEI_FLAG=-PwithJei"
+if /I "%~2"=="nojei" set "JEI_FLAG="
+
 if not exist "%JAVA_HOME%\bin\javac.exe" (
     echo [BeyondEMC] ERROR: no JDK found at "%JAVA_HOME%"
     echo             Edit JAVA_HOME in tools\play.cmd
@@ -45,13 +53,14 @@ echo ============================================================
 echo   JAVA_HOME        = %JAVA_HOME%
 echo   GRADLE_USER_HOME = %GRADLE_USER_HOME%
 echo   Gradle task      = %TASK%
+echo   Extra args       = %JEI_FLAG%  (JEI on run classpath)
 echo ============================================================
 echo.
 echo   The game window will open shortly.
 echo   KEEP THIS CONSOLE OPEN while playing - closing it stops the game.
 echo.
 
-call gradlew.bat %TASK% --console=plain
+call gradlew.bat %TASK% --console=plain %JEI_FLAG%
 set "RC=%ERRORLEVEL%"
 
 echo.

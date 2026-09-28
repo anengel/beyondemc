@@ -116,22 +116,62 @@ public final class EmcAvailabilityInjector {
         if (out == null) {
             return storage;
         }
-        // 前几次用 INFO 打出来：JEI 的 Mixin 只在"客户端 + 装了 JEI"时才应用，
-        // 那是无头环境**无法验证**的部分。这一行是实机确认它生效的唯一直接证据。
-        long seq = ++injectCount;
-        String summary = String.format(
-                "JEI 可用池注入：追加 %d 条可兑换物品（余额 %d，已学习 %d 项，原列表 %d 条 → %d 条）",
-                added, emc, entry.learned().size(), storage.size(), out.size());
-        if (seq <= LOG_FIRST_N) {
-            BeyondEmc.LOGGER.info("[BeyondEMC] {}", summary);
-        } else {
-            BeyondEmc.LOGGER.debug("[BeyondEMC] {}", summary);
+        if (!quiet) {
+            long seq = ++injectCount;
+            String summary = String.format(
+                    "JEI 可用池注入：追加 %d 条可兑换物品（余额 %d，已学习 %d 项，原列表 %d 条 → %d 条）",
+                    added, emc, entry.learned().size(), storage.size(), out.size());
+            if (seq <= LOG_FIRST_N) {
+                BeyondEmc.LOGGER.info("[BeyondEMC] {}", summary);
+            } else {
+                BeyondEmc.LOGGER.debug("[BeyondEMC] {}", summary);
+            }
         }
         return out;
     }
 
     private static long injectCount = 0;
     private static final int LOG_FIRST_N = 5;
+
+    /**
+     * 自检期间静默。
+     *
+     * <p>⚠️ **教训（0.2.0-B 首轮实测）**：自检用的合成数据（余额 999999999、819200 等）
+     * 也会打出"JEI 可用池注入"日志，与真实 JEI 交互的日志**完全无法区分** ——
+     * 诊断信号被自己的测试污染，导致"到底有没有生效"判断不了，白跑一轮实机。
+     *
+     * <p>所以自检必须把自己的输出与生产输出分开。这与
+     * "扣费数量必须等于交付数量"是同一条纪律：**测量手段不能改变被测对象**。
+     */
+    private static volatile boolean quiet = false;
+
+    public static void setQuiet(boolean value) {
+        quiet = value;
+    }
+
+    private static long invokedCount = 0;
+
+    /**
+     * 由 {@code TransferHelperMixin} 在每次进入注入点时调用。
+     *
+     * <p>这是区分两种失败模式的**唯一**判据：
+     * <ul>
+     *   <li>没有这行 → Mixin 根本没生效（注入点没匹配上，而 {@code require = 0} 是静默跳过的）；</li>
+     *   <li>有这行但没有后面的"追加 N 条" → Mixin 生效了，只是当时确实没有可注入的物品
+     *       （没学会 / 买不起 / 知识清单为空）。</li>
+     * </ul>
+     */
+    public static void noteMixinInvoked() {
+        long n = ++invokedCount;
+        if (!quiet && n <= LOG_FIRST_N) {
+            BeyondEmc.LOGGER.info("[BeyondEMC] JEI 转移钩子被调用（第 {} 次）：Mixin 已生效", n);
+        }
+    }
+
+    /** 诊断用：注入点被调用的累计次数。 */
+    public static long invokedCount() {
+        return invokedCount;
+    }
 
     /** 从客户端网络存储列表里读 EMC 余额（BD 已把它作为一条普通资源同步过来）。 */
     private static long readNetworkEmc(List<KeyAmount> storage) {

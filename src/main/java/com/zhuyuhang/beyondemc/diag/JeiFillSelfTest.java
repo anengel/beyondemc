@@ -54,6 +54,11 @@ public final class JeiFillSelfTest {
         List<String> out = new ArrayList<>();
         int ok = 0;
 
+        // ⚠️ 自检期间必须静默注入器的日志：否则自检的合成数据（余额 819200 等）
+        // 会打出与真实 JEI 交互一模一样的"JEI 可用池注入"行，
+        // 让"功能到底有没有生效"无法判断（0.2.0-B 首轮实测就栽在这里）。
+        EmcAvailabilityInjector.setQuiet(true);
+
         final ItemInfo diamond = ItemInfo.fromStack(new ItemStack(Items.DIAMOND));
         final ItemInfo emerald = ItemInfo.fromStack(new ItemStack(Items.EMERALD));
 
@@ -162,6 +167,7 @@ public final class JeiFillSelfTest {
         }
 
         ClientKnowledgeCache.clear(); // 自检不留状态给后续逻辑
+        EmcAvailabilityInjector.setQuiet(false); // 恢复生产日志
         out.add("---- JEI 配方填充可用量自检结果：" + ok + "/5 项通过 ----");
         return out;
     }

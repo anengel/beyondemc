@@ -43,6 +43,9 @@ public class TransferHelperMixin {
      */
     @ModifyVariable(method = "transferRecipe", at = @At("HEAD"), argsOnly = true, index = 1)
     private static List<KeyAmount> beyondemc$injectEmcAvailability(List<KeyAmount> storage) {
+        // 先留痕：这行日志是区分"Mixin 没生效"与"处理器没被调用"的唯一判据
+        // （require = 0 时注入点失配是静默的）。自检期间会自动静默。
+        EmcAvailabilityInjector.noteMixinInvoked();
         return EmcAvailabilityInjector.withEmcAvailability(storage);
     }
 }
