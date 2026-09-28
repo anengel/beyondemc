@@ -9,6 +9,7 @@ import com.wintercogs.beyonddimensions.common.menu.widget.slot.AbstractStackType
 import com.zhuyuhang.beyondemc.BeyondEmc;
 import com.zhuyuhang.beyondemc.client.ClientKnowledgeCache;
 import com.zhuyuhang.beyondemc.client.VirtualEntryProvider;
+import com.zhuyuhang.beyondemc.exchange.ExchangeIntent;
 import com.zhuyuhang.beyondemc.exchange.ExchangeRequestPacket;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -90,24 +91,38 @@ public abstract class BDBaseGUIMixin {
             return;
         }
 
-        int count = 1;
-        if (Screen.hasShiftDown()) {
-            // Shift+左键 = 取出一"组"（该物品的原版最大堆叠数，绝大多数物品就是 64），
-            // 但不超过界面上显示的可兑换数量。
-            // 早期版本用的是 clicked.amount()（可兑换总量，可能是几百个），
-            // 实测反馈要的是"一组"，所以改成按最大堆叠数取。
-            long group = Math.max(1L, itemKey.getVanillaMaxStackSize());
-            count = (int) Math.min(Math.min(group, clicked.amount()), Integer.MAX_VALUE);
-            count = Math.max(1, count);
+        // 一组 = 该物品的原版最大堆叠数（钻石 64、鸡蛋 16、工具 1）
+        long group = Math.max(1L, itemKey.getVanillaMaxStackSize());
+        // 界面上显示的可兑换数量（买不起的物品根本不会被注入，所以这里 >= 1）
+        long affordable = Math.max(1L, clicked.amount());
+        long whole = Math.min(group, affordable);
+
+        // 0.2.0 的点击口径（见 docs/plan/ROADMAP-0.2.0.md §1.4）：
+        //   左键      → 一组【吸附到鼠标】（像原版拾取）
+        //   右键      → 一半吸附到鼠标
+        //   Shift+左键 → 一组【直接进背包】（0.1.0 的旧行为，保留为快捷方式）
+        // 客户端给的只是建议数量，服务端会用 ExchangeService.cursorCapacity 重新裁剪。
+        ExchangeIntent intent;
+        long wanted;
+        if (type == ClickType.QUICK_MOVE) {
+            intent = ExchangeIntent.QUICK_MOVE_TO_INVENTORY;
+            wanted = whole;
+        } else if (mouseButton == 1) {
+            intent = ExchangeIntent.PICKUP_TO_CURSOR;
+            wanted = Math.max(1L, (whole + 1L) / 2L); // 原版右键取一半（向上取整）
+        } else {
+            intent = ExchangeIntent.PICKUP_TO_CURSOR;
+            wanted = whole;
         }
+        int count = (int) Math.min(Math.max(1L, wanted), Integer.MAX_VALUE);
 
         // getReadOnlyStack() 按 IStackKey 契约返回数量恒为 1 的堆叠，数量由 count 单独传
         ItemStack template = itemKey.getReadOnlyStack();
-        PacketDistributor.sendToServer(new ExchangeRequestPacket(entry.netId(), template, count));
+        PacketDistributor.sendToServer(new ExchangeRequestPacket(entry.netId(), template, count, intent));
 
         if (++clickCount <= 8) {
-            BeyondEmc.LOGGER.info("[BeyondEMC] 拦截虚拟条目点击：{} ×{}（网络 {}）",
-                    template.getItem(), count, entry.netId());
+            BeyondEmc.LOGGER.info("[BeyondEMC] 拦截虚拟条目点击：{} ×{}，意图={}（网络 {}）",
+                    template.getItem(), count, intent, entry.netId());
         }
 
         ci.cancel();

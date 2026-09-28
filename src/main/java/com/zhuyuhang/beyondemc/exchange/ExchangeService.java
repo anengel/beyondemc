@@ -212,6 +212,130 @@ public final class ExchangeService {
     }
 
     // ------------------------------------------------------------------
+    // 吸附到鼠标（0.2.0）
+    // ------------------------------------------------------------------
+
+    /** 鼠标上已有不同物品，无法吸附。 */
+    public static final int CURSOR_OCCUPIED = -1;
+
+    /** 鼠标上的同类堆叠已满。 */
+    public static final int CURSOR_FULL = 0;
+
+    /**
+     * **纯计算**：鼠标当前能再吸附多少个 {@code canonical}。
+     *
+     * <p>抽成独立方法与 {@code EmcDepositHandler.skipReason} 同理：
+     * 吸附容量的规则（空鼠标 / 同类可合并 / 异类拒绝 / 上限）是本功能最容易出错的地方，
+     * 做成纯函数就能在无头环境里被自检**决定性**验证，而不必依赖图形界面。
+     *
+     * @param carried   鼠标当前拿着的堆叠（可为空堆叠）
+     * @param canonical 归一化身份重建出的堆叠（**不是**客户端传来的原始对象）
+     * @param requested 客户端建议的数量（不可信）
+     * @return 实际可吸附数量；{@link #CURSOR_OCCUPIED} 表示鼠标被动占用；
+     *         {@link #CURSOR_FULL} 表示同类堆叠已满
+     */
+    public static int cursorCapacity(@NotNull ItemStack carried, @NotNull ItemStack canonical, int requested) {
+        if (canonical.isEmpty() || requested <= 0) {
+            return CURSOR_FULL;
+        }
+        int maxStack = Math.max(1, canonical.getMaxStackSize());
+        if (carried.isEmpty()) {
+            return Math.min(requested, maxStack);
+        }
+        if (!ItemStack.isSameItemSameComponents(carried, canonical)) {
+            return CURSOR_OCCUPIED;
+        }
+        return Math.min(requested, maxStack - carried.getCount());
+    }
+
+    /**
+     * 用 EMC 兑换并把物品**吸附到鼠标**（像原版拾取）。
+     *
+     * <h2>安全关键：先算能吸附多少，再按这个数量扣费</h2>
+     * 绝不能"先扣钱、再发现鼠标放不下"。0.1.0 那个数据丢失 bug
+     * （信任 `Inventory.add` 的返回值，而它在创造模式下会销毁物品却返回 true）
+     * 就是同型错误。这里的不变式是：
+     *
+     * <pre>扣费数量 == 吸附到鼠标的数量</pre>
+     *
+     * <p>与那条旧路径的区别在于：{@code menu.setCarried(...)} 只是给字段赋值，
+     * **没有会撒谎的中间层**；而且容量在扣费之前就用 {@link #cursorCapacity} 定好了。
+     * 即便如此仍加了 try/catch 回滚，避免任何意外路径造成"扣了钱没拿到"。
+     */
+    public static Result pickupToCursor(@NotNull ServerPlayer player, @Nullable DimensionsNet net,
+                                        @NotNull ItemStack template, int requested) {
+        if (net == null) {
+            return Result.fail("找不到该维度网络");
+        }
+        if (!canAccess(player, net)) {
+            return Result.fail("你不属于这个维度网络");
+        }
+        if (!(player.containerMenu instanceof net.minecraft.world.inventory.AbstractContainerMenu menu)) {
+            return Result.fail("当前没有打开可操作的界面");
+        }
+
+        // 身份归一：绝不拿客户端传来的对象去铸造（防刷物品漏洞的同一条防线）
+        CanonicalExchange.Resolved resolved = CanonicalExchange.resolve(template);
+        if (resolved == null) {
+            return Result.fail("请求的物品无效");
+        }
+        ItemInfo info = resolved.info();
+        ItemStack canonical = resolved.stack();
+
+        ItemStack carried = menu.getCarried();
+        // 客户端建议的数量先按配置上限裁剪，再交给容量计算
+        long cap = com.zhuyuhang.beyondemc.config.BeyondEmcConfig.maxExchangePerClick();
+        int requestedCapped = (int) Math.min(requested, Math.min(cap, Integer.MAX_VALUE));
+        int capacity = cursorCapacity(carried, canonical, requestedCapped);
+        if (capacity == CURSOR_OCCUPIED) {
+            return Result.fail("鼠标上已有其他物品，请先放下再兑换");
+        }
+        if (capacity <= 0) {
+            return Result.fail(carried.isEmpty() ? "请求的数量无效" : "鼠标上的堆叠已经满了");
+        }
+
+        // 余额校验（会顺带校验"是否已学会"与"是否有 EMC 价值"）
+        Validation v = validate(net, info, capacity);
+        if (!v.ok()) {
+            return Result.fail(v.reason());
+        }
+
+        long cost = v.totalCost();
+        long spent = 0L;
+        try {
+            spent = NetEmcAccessor.spendEmc(net, cost);
+            if (spent < cost) {
+                // 并发情况下余额被抢走：回滚并放弃，绝不半途
+                if (spent > 0L) {
+                    NetEmcAccessor.addEmc(net, spent);
+                }
+                return Result.fail("扣除 EMC 失败，请重试");
+            }
+
+            // 吸附：与鼠标上已有堆叠合并（上面已确认是同类或为空）
+            ItemStack merged = carried.isEmpty()
+                    ? canonical.copyWithCount(capacity)
+                    : carried.copyWithCount(carried.getCount() + capacity);
+            menu.setCarried(merged);
+            // 立即推送一次，玩家不必等下一 tick 才看到（broadcastChanges 内会同步 carried）
+            menu.broadcastChanges();
+
+            BeyondEmc.LOGGER.debug("[BeyondEMC] 吸附到鼠标：{} ×{} → 花费 {} EMC（单价 {}）",
+                    info, capacity, spent, v.unitPrice());
+            return new Result(true,
+                    "吸附 " + capacity + " 个 " + info + " 到鼠标，花费 " + spent + " EMC",
+                    spent, capacity, 0L);
+        } catch (Throwable t) {
+            // 任何异常都回滚，保证"扣费数量 == 交付数量"
+            if (spent > 0L) {
+                NetEmcAccessor.addEmc(net, spent);
+            }
+            BeyondEmc.LOGGER.error("[BeyondEMC] 吸附到鼠标时出错，已回滚 EMC", t);
+            return Result.fail("吸附失败：内部错误（EMC 已退回）");
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 辅助
     // ------------------------------------------------------------------
 
