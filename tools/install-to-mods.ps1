@@ -58,6 +58,17 @@ foreach ($pattern in @('*beyonddimensions*.jar', '*projecte*.jar')) {
     if ($f) { $prereqs += $f; Ok ("前置模组: {0}" -f $f.Name) }
     else    { Warn ("缺少前置模组 jar: libs\{0}（获取方式见 libs\README.md）" -f $pattern) }
 }
+
+# JEI 是**可选**的：只有装了它，「JEI 配方填充自动用 EMC 兑换」才可用。
+# 它不参与下面的"前置不齐全"判断（缺了也不影响模组加载）。
+$jei = Get-ChildItem -LiteralPath $libsDir -File -ErrorAction SilentlyContinue |
+       Where-Object { $_.Name -match 'jei-1\.21\.1' } | Select-Object -First 1
+if ($jei) {
+    $prereqs += $jei
+    Ok ("可选集成: {0}（启用 JEI 配方填充）" -f $jei.Name)
+} else {
+    Info "未找到 JEI（可选）。没有它时本模组照常工作，只是少了 JEI 配方填充功能。"
+}
 if ($prereqs.Count -lt 2) {
     Warn "前置不齐全。安装后游戏会因缺少依赖而拒绝加载本模组。是否继续？"
     if (-not $Yes) {
