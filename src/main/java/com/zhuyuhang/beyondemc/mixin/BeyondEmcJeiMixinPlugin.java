@@ -1,6 +1,6 @@
 package com.zhuyuhang.beyondemc.mixin;
 
-import net.neoforged.fml.ModList;
+import com.zhuyuhang.beyondemc.BeyondEmc;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * JEI 相关 Mixin 的**端侧/依赖门控**。
+ * JEI 相关 Mixin 的**门控**。
  *
  * <h2>为什么必须有它</h2>
  * {@code TransferHelperMixin} 的目标类
@@ -20,44 +20,64 @@ import java.util.Set;
  *   <li>但 Mixin 在**准备阶段**就会尝试加载我们的 mixin 类来读取注解，
  *       而该类的 handler 签名含 JEI 类型 → {@code NoClassDefFoundError} → <b>可能直接崩游戏</b>。</li>
  * </ul>
- * 所以必须让 Mixin **在 JEI 缺席时整体跳过**这个配置，而不是指望它自己优雅失败。
+ * 所以必须让 Mixin **在 JEI 缺席时整体跳过**这个配置。
  *
- * <h2>为什么懒判断</h2>
- * {@code shouldApplyMixin} 里才去问 {@link ModList}，而不是在 {@code onLoad} 里缓存 ——
- * {@code onLoad} 的调用时机早于我们愿意假设的模组加载阶段，
- * 懒判断只多一次 map 查询，却避免了对时机的假设。
+ * <h2>⚠️ 门控判据为什么用"类路径"而不是 ModList</h2>
+ * 最初写的是 {@code ModList.get().isLoaded("jei")}，实测**失效**：
+ * 目标方法确实存在（启动核查报"已核对 1 个"），但 {@code JEI 转移钩子被调用} 一次都没打 ——
+ * 也就是这个配置被整体跳过了。
  *
- * <p>本类**刻意不引用任何 JEI 类型**，因此它在任何环境下都能安全加载。
+ * <p>原因：{@link #shouldApplyMixin} 会在 Mixin **配置准备阶段**被调用，
+ * 那时 {@code ModList} 未必已经就绪；一旦那时判为 false 并被缓存，
+ * 这个 Mixin 就**永远不会应用**（而 {@code required = false} 让整件事毫无报错）。
+ *
+ * <p>改用 {@code Class.forName} 探测 JEI 的入口类：它只看类路径，
+ * 与模组加载阶段无关，因此不受调用时机影响。
+ *
+ * <p>本类刻意**不引用任何 JEI 类型**（只用字符串类名），因此任何环境下都能安全加载。
  */
 public final class BeyondEmcJeiMixinPlugin implements IMixinConfigPlugin {
 
-    private static final String JEI_MOD_ID = "jei";
+    /** JEI 的入口接口。用字符串写，避免编译期依赖。 */
+    private static final String JEI_ENTRY_CLASS = "mezz.jei.api.IModPlugin";
 
     private static Boolean jeiPresent;
 
-    private static boolean isJeiPresent() {
+    private static boolean gateLogged;
+
+    /** 只在第一次真正需要判断时探测一次，并在日志里留痕。 */
+    private static boolean detectJei() {
         Boolean cached = jeiPresent;
-        if (cached == null) {
-            boolean present;
-            try {
-                present = ModList.get() != null && ModList.get().isLoaded(JEI_MOD_ID);
-            } catch (Throwable t) {
-                present = false; // 拿不到就当没装：宁可功能不生效，也不要崩
-            }
-            cached = present;
-            jeiPresent = cached;
+        if (cached != null) {
+            return cached;
         }
-        return cached;
+        boolean present;
+        try {
+            Class.forName(JEI_ENTRY_CLASS, false, BeyondEmcJeiMixinPlugin.class.getClassLoader());
+            present = true;
+        } catch (Throwable t) {
+            present = false; // 探测不到就当没装：宁可功能不生效，也不要崩
+        }
+        jeiPresent = present;
+        return present;
     }
 
     @Override
     public void onLoad(String mixinPackage) {
-        // 无需预热：见类注释里"为什么懒判断"
+        // 这一行本身就是判据：它出现 = NeoForge 确实加载了这个 mixin 配置。
+        // （若 mods.toml 的第二个 [[mixins]] 块不被支持，这里就不会有任何输出。）
+        BeyondEmc.LOGGER.info("[BeyondEMC] JEI Mixin 配置已加载（package={}）", mixinPackage);
     }
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-        return isJeiPresent();
+        boolean present = detectJei();
+        if (!gateLogged) {
+            gateLogged = true;
+            BeyondEmc.LOGGER.info("[BeyondEMC] JEI Mixin 门控判定：jei 在类路径上={}（判据={}），目标={}",
+                    present, JEI_ENTRY_CLASS, targetClassName);
+        }
+        return present;
     }
 
     @Override
@@ -84,6 +104,6 @@ public final class BeyondEmcJeiMixinPlugin implements IMixinConfigPlugin {
     @Override
     public void postApply(String targetClassName, ClassNode targetClass,
                           String mixinClassName, IMixinInfo mixinInfo) {
-        // 无后置处理
+        BeyondEmc.LOGGER.info("[BeyondEMC] JEI Mixin 已应用到 {}（{}）", targetClassName, mixinClassName);
     }
 }
