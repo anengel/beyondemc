@@ -12,6 +12,7 @@ import com.zhuyuhang.beyondemc.config.BeyondEmcConfig;
 import com.zhuyuhang.beyondemc.core.EmcAvailability;
 import com.zhuyuhang.beyondemc.diag.EmcStorageSelfTest;
 import com.zhuyuhang.beyondemc.diag.CursorPickupSelfTest;
+import com.zhuyuhang.beyondemc.diag.JeiFillSelfTest;
 import com.zhuyuhang.beyondemc.diag.Phase3SelfTest;
 import com.zhuyuhang.beyondemc.diag.InterfaceWithdrawSelfTest;
 import com.zhuyuhang.beyondemc.diag.MixinTargetCheck;
@@ -203,6 +204,10 @@ public class BeyondEmc {
         }
         LOGGER.info("[BeyondEMC] ---- 兑换物品吸附到鼠标（0.2.0）----");
         for (String line : CursorPickupSelfTest.run()) {
+            LOGGER.info("[BeyondEMC] {}", line);
+        }
+        LOGGER.info("[BeyondEMC] ---- JEI 配方填充可用量（0.2.0，不依赖 JEI 存在）----");
+        for (String line : JeiFillSelfTest.run()) {
             LOGGER.info("[BeyondEMC] {}", line);
         }
         LOGGER.info("[BeyondEMC] ===== 自检结束 =====");

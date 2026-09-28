@@ -26,6 +26,12 @@ logoFile="beyondemc.png"
 [[mixins]]
 config="${mod_id}.mixins.json"
 
+# JEI 集成的 Mixin 放在**独立配置**里：它引用了 JEI 的类型，
+# JEI 缺席时必须整体跳过（否则加载我们的 mixin 类会 NoClassDefFoundError）。
+# 门控由 BeyondEmcJeiMixinPlugin 负责（见该配置的 plugin 键）。
+[[mixins]]
+config="${mod_id}.jei.mixins.json"
+
 # ============ 依赖 ============
 # ordering="AFTER" 对 beyonddimensions / projecte 是必需的：
 # 我们会对它们的类做 Mixin，目标类必须先存在于类路径上。
@@ -59,6 +65,15 @@ type="required"
 versionRange="[1.1.0,)"
 ordering="AFTER"
 side="BOTH"
+
+# JEI —— **可选**依赖，只用于「合成栏配方填充自动用 EMC 兑换」这一功能。
+# 不装 JEI 时本模组一切照常，只是没有该集成。side="CLIENT" 是因为 JEI 本身是客户端模组。
+[[dependencies.${mod_id}]]
+modId="jei"
+type="optional"
+versionRange="[19,)"
+ordering="AFTER"
+side="CLIENT"
 
 [features.${mod_id}]
 javaVersion="[21,)"

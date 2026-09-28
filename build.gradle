@@ -31,6 +31,16 @@ repositories {
             includeGroup 'curse.maven'
         }
     }
+
+    // JEI 的公共 Maven。JEI 是**可选**依赖（见下方 dependencies 与
+    // docs/plan/ROADMAP-0.2.0.md §2），但编译我们的 JEI Mixin 需要它的类型。
+    maven {
+        name = 'BlameJared'
+        url = project.jei_maven_url
+        content {
+            includeGroup 'mezz.jei'
+        }
+    }
 }
 
 neoForge {
@@ -95,6 +105,24 @@ dependencies {
     } else {
         compileOnly "curse.maven:projecte-226410:6611984"
         runtimeOnly "curse.maven:projecte-226410:6611984"
+    }
+
+    // ------------------------------------------------------------
+    // JEI —— **可选**依赖，且**只 compileOnly**。
+    //
+    // 为什么只有 compileOnly：
+    //   JEI 是客户端专用模组。若放进 runtime 类路径，专用服务器的模组加载会看到它
+    //   却无法满足其 CLIENT 侧依赖 —— 那会让我们的无头自检（runServer）失效。
+    //   本模组**不依赖 JEI 存在**（mods.toml 里声明为 optional），所以能编译即可。
+    //
+    // 想测"JEI 配方填充"就把它放进游戏的 mods/：
+    //   libs/jei-1.21.1-neoforge-<版本>.jar 是本地副本，tools/install-to-mods.cmd 会一并装上。
+    // ------------------------------------------------------------
+    def jeiJar = file("libs/jei-1.21.1-neoforge-${jei_version}.jar")
+    if (jeiJar.exists()) {
+        compileOnly files(jeiJar)
+    } else {
+        compileOnly "mezz.jei:jei-1.21.1-neoforge:${jei_version}"
     }
 }
 
