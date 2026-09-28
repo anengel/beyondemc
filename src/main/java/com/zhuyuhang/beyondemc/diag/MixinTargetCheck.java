@@ -30,6 +30,27 @@ public final class MixinTargetCheck {
     private record Target(String className, boolean clientOnly, String member, String... params) {
     }
 
+    /** 只在某个可选模组存在时才核对的注入目标。 */
+    private record OptionalTarget(String requiredMod, String className, String member, String... params) {
+    }
+
+    /**
+     * 可选集成（目前是 JEI）的注入目标。
+     *
+     * <p>为什么需要单独一组：JEI 的类**不该被本模组的任何类引用**（否则 JEI 缺席时会
+     * {@code NoClassDefFoundError}），所以这里一律用**字符串类名 + 反射**。
+     * 而 {@code JeiFillSelfTest} 只能验证纯逻辑，验证不了"注入点还在不在"——
+     * 那正是这次 B 首轮失效时无法判断的那一环。
+     */
+    private static final List<OptionalTarget> OPTIONAL_TARGETS = List.of(
+            new OptionalTarget("jei",
+                    "com.wintercogs.beyonddimensions.integration.module.jei.transfer.TransferHelper",
+                    "transferRecipe",
+                    "java.util.List", "java.util.List", "java.util.List",
+                    "mezz.jei.api.gui.ingredient.IRecipeSlotsView",
+                    "boolean", "boolean", "boolean")
+    );
+
     private static final List<Target> TARGETS = List.of(
             // 读档守卫（@WrapMethod，唯一 require = 1）
             new Target("com.wintercogs.beyonddimensions.api.storage.handler.impl.AbstractUnorderedStackHandler",
@@ -102,15 +123,52 @@ public final class MixinTargetCheck {
             }
         }
 
+        // ---- 可选集成（JEI）的注入目标 ----
+        // 这是"B 到底有没有接上"唯一不依赖 JEI 交互的判据：客户端启动即核对。
+        int optionalChecked = 0;
+        int optionalSkipped = 0;
+        for (OptionalTarget t : OPTIONAL_TARGETS) {
+            if (!isModLoaded(t.requiredMod())) {
+                optionalSkipped++;
+                continue;
+            }
+            String label = "[" + t.requiredMod() + "] "
+                    + t.className().substring(t.className().lastIndexOf('.') + 1) + "#" + t.member();
+            try {
+                Class<?> owner = Class.forName(t.className(), false,
+                        MixinTargetCheck.class.getClassLoader());
+                owner.getDeclaredMethod(t.member(), resolve(t.params()));
+                optionalChecked++;
+            } catch (Throwable e) {
+                String reason = e.getClass().getSimpleName()
+                        + (e.getMessage() == null ? "" : ": " + e.getMessage());
+                failures.put(label, reason);
+            }
+        }
+
         if (failures.isEmpty()) {
             out.add("OK   Mixin 目标存活性：核对了 " + checked + " 个目标，全部存在"
                     + (skipped > 0 ? "（" + skipped + " 个客户端专项目标在专用服务器上跳过）" : ""));
+            if (optionalChecked > 0 || optionalSkipped > 0) {
+                out.add("     （可选集成：已核对 " + optionalChecked + " 个，"
+                        + optionalSkipped + " 个因对应模组未加载而跳过）");
+            }
         } else {
             out.add("FAIL Mixin 目标存活性：以下目标在当前的 Beyond Dimensions 版本里【已不存在】——"
                     + "对应的 Mixin 会静默失效，功能会无声消失：");
             failures.forEach((k, v) -> out.add("      - " + k + "  →  " + v));
         }
         return out;
+    }
+
+    /** 该模组是否已加载。用字符串 modId，避免对可选模组产生编译期依赖。 */
+    private static boolean isModLoaded(String modId) {
+        try {
+            return net.neoforged.fml.ModList.get() != null
+                    && net.neoforged.fml.ModList.get().isLoaded(modId);
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private static Class<?>[] resolve(String[] names) throws ClassNotFoundException {
