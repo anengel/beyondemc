@@ -463,6 +463,10 @@ tools\gradlew-here.cmd build       # 重新出 jar
 | `backups/beyondemc-0.3.0-source.zip` | ✅ **本轮新建** | SHA-256 `15F78EED…` |
 | `backups/beyondemc-1.21.1-neoforge-0.3.0.jar` | ✅ **本轮新建** | SHA-256 `C235AC96…` |
 | `backups/本地开发环境参考手册.md` | ✅ **本轮新建** | 手工复制（该文件未跟踪，bundle/archive 拿不到）；SHA-256 `d476b6e4…` |
+| tag `v0.3.1`（附注 tag → `2e5b8e3`） | ✅ **本轮新建** | 自检覆盖三条抽取入口（关闭 S-0.3-7），不改游玩行为 |
+| `backups/beyondemc-0.3.1.bundle` | ✅ **本轮新建**（每次提交后**重跑演练**） | 演练（临时克隆自该 bundle）：**4 个 tag 全在**、`v0.3.1` → `2e5b8e3`、`v0.3.0` → `e1d0958`、102 跟踪文件、工作树干净；跑完删掉克隆目录 |
+| `backups/beyondemc-0.3.1-source.zip` | ✅ **本轮新建** | SHA-256 `0E811D19…` |
+| `backups/beyondemc-1.21.1-neoforge-0.3.1.jar` | ✅ **本轮新建** | SHA-256 `55AB563F…`；自检 0 FAIL、物化组 26/26、累计 54 项通过 |
 
 > **纪律**：每个阶段结束、以及每次做有风险的改动之前，重新跑一遍备份并**真克隆一次**（`docs/plan/ROADMAP.md` §6 与项目根 `MC-MOD-GUIDE.md` §6）。没演练过的备份不算备份。
 > **`本地开发环境参考手册.md` 的处理结论**：它含本机私有路径（含 `C:\Users\朱雨杭\.ssh\id_ed25519`，并注明"无密码短语"），而仓库将来要推到 GitHub ⇒ **决定不纳入 git**，改为在 `backups/` 里手工存一份磁盘兜底（已做，校验和一致）。因此它是唯一「有备份、但不在任何 bundle 里」的文件。
