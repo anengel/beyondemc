@@ -453,20 +453,24 @@ tools\gradlew-here.cmd build       # 重新出 jar
 | 分支 `backup/v0.1.0` | ✅ 原有 | `git branch -a` |
 | 分支 `backup/v0.2.0` | ✅ **本轮新建**（指向 `9aa9f43`） | `git branch -a` |
 | `backups/beyondemc-0.2.0.bundle` | ✅ 复核可用 | 演练：HEAD `9aa9f43`、14 提交、`v0.1.0`+`v0.2.0` 均在、92 文件、工作树干净 |
-| `backups/beyondemc-0.2.0-source.zip` | ✅ 校验和与 `backups/README.md` 记录一致 | SHA-256 `4fa9385f…` |
-| `backups/beyondemc-1.21.1-neoforge-0.2.0.jar` | ✅ 校验和一致 | SHA-256 `71c4f3ba…` |
+| `backups/beyondemc-0.2.0-source.zip` | ✅ 与 `backups/README.md` 记录的校验和一致 | 详见 `backups/README.md` |
+| `backups/beyondemc-1.21.1-neoforge-0.2.0.jar` | ✅ 校验和一致 | 详见 `backups/README.md` |
 | `backups/deps/`（两个前置 jar，不在 git 里） | ✅ 就位 | `beyonddimensions-1.21.1-0.7.30.jar`、`projecte-1.21.1-1.1.0.jar` |
 | `backups/beyondemc-0.3-baseline.bundle` | ✅ **本轮新建** | 演练：HEAD `d30cbff`、15 提交、93 文件、工作树干净 |
-| `backups/beyondemc-0.3-baseline-source.zip` | ✅ **本轮新建** | SHA-256 `72e2b7a7…` |
+| `backups/beyondemc-0.3-baseline-source.zip` | ✅ **本轮新建** | 93 个跟踪文件的快照 |
 | tag `v0.3.0`（附注 tag → `e1d0958`） | ✅ **本轮新建** | `git rev-parse 'v0.3.0^{commit}'` = `e1d0958` |
 | `backups/beyondemc-0.3.0.bundle` | ✅ **本轮新建**（每次提交后**重跑演练**） | 演练（临时克隆自该 bundle）：3 个 tag 全在、`v0.3.0` → `e1d0958`、102 跟踪文件、工作树干净；跑完删掉克隆目录 |
-| `backups/beyondemc-0.3.0-source.zip` | ✅ **本轮新建** | SHA-256 `15F78EED…` |
-| `backups/beyondemc-1.21.1-neoforge-0.3.0.jar` | ✅ **本轮新建** | SHA-256 `C235AC96…` |
-| `backups/本地开发环境参考手册.md` | ✅ **本轮新建** | 手工复制（该文件未跟踪，bundle/archive 拿不到）；SHA-256 `d476b6e4…` |
+| `backups/beyondemc-0.3.0-source.zip` | ✅ **本轮新建** | 102 个跟踪文件的快照 |
+| `backups/beyondemc-1.21.1-neoforge-0.3.0.jar` | ✅ **本轮新建** | 0.3.0 的发布产物 |
+| `backups/本地开发环境参考手册.md` | ✅ **本轮新建** | 手工复制（该文件未跟踪，bundle/archive 拿不到），与仓库根同名文件逐字节相同 |
 | tag `v0.3.1`（附注 tag → `2e5b8e3`） | ✅ **本轮新建** | 自检覆盖三条抽取入口（关闭 S-0.3-7），不改游玩行为 |
 | `backups/beyondemc-0.3.1.bundle` | ✅ **本轮新建**（每次提交后**重跑演练**） | 演练（临时克隆自该 bundle）：**4 个 tag 全在**、`v0.3.1` → `2e5b8e3`、`v0.3.0` → `e1d0958`、102 跟踪文件、工作树干净；跑完删掉克隆目录 |
-| `backups/beyondemc-0.3.1-source.zip` | ✅ **本轮新建** | SHA-256 `0E811D19…` |
-| `backups/beyondemc-1.21.1-neoforge-0.3.1.jar` | ✅ **本轮新建** | SHA-256 `55AB563F…`；自检 0 FAIL、物化组 26/26、累计 54 项通过 |
+| `backups/beyondemc-0.3.1-source.zip` | ✅ **本轮新建** | 102 个跟踪文件的快照 |
+| `backups/beyondemc-1.21.1-neoforge-0.3.1.jar` | ✅ **本轮新建** | 自检 **0 FAIL**、物化组 **26/26**、累计 **54 项通过** + 4 目标跳过（`run/verify-031.log`） |
+
+> **校验和为什么不写在本文件里**：写了会自指 —— 改这个文件就产生新提交、备份包随之变、这里的校验和立刻过期。
+> 因此本表只记**不随提交变化**的事实（tag → commit、跟踪文件数、工作树是否干净、演练结论）；
+> 具体的字节数与 SHA-256 统一记在 `backups/README.md`（该目录被 gitignore，更新它不产生提交）。
 
 > **纪律**：每个阶段结束、以及每次做有风险的改动之前，重新跑一遍备份并**真克隆一次**（`docs/plan/ROADMAP.md` §6 与项目根 `MC-MOD-GUIDE.md` §6）。没演练过的备份不算备份。
 > **`本地开发环境参考手册.md` 的处理结论**：它含本机私有路径（含 `C:\Users\朱雨杭\.ssh\id_ed25519`，并注明"无密码短语"），而仓库将来要推到 GitHub ⇒ **决定不纳入 git**，改为在 `backups/` 里手工存一份磁盘兜底（已做，校验和一致）。因此它是唯一「有备份、但不在任何 bundle 里」的文件。
