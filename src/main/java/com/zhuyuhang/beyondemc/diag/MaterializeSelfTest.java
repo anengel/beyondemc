@@ -70,12 +70,67 @@ public final class MaterializeSelfTest {
         zeroChargeGuard(out, ok);
         slotExtractEntry(out, ok);
         tagExtractEntry(out, ok);
+        observedSnapshotIsolation(out, ok);
 
         out.add("---- 物化（0.3.0）自检结果：" + ok[0] + " 项通过 ----");
         return out;
     }
 
     // ------------------------------------------------------------------
+
+    /**
+     * 11. 诊断隔离不变式：{@link ItemMaterializer#restoreObserved} 必须能精确移除
+     * "快照之后新登记的网络"，而<b>不动</b>快照里已有的网络。
+     *
+     * <p>为什么这条要单独立项：本套自检自己就用 {@code new DimensionsNet(true)} 造临时网络，
+     * 若这些临时网络泄漏进全局已观测集合，每次 {@code /reload} 的 {@code refreshAll} 都会为它们
+     * 空转，并把真实网络那条「物化（第 N 次）」日志挤出 {@code LOG_FIRST_N} 上限 ——
+     * 实测排查"大炮看不到某材料"时，唯一想看的那行就是因为这个而不可见。
+     * 隔离机制本身失效是<b>静默</b>的（只是日志难读），所以必须断言。
+     */
+    private static void observedSnapshotIsolation(List<String> out, int[] ok) {
+        try {
+            // 起点：此刻已观测的网络集合（真实网络在里面 —— 整轮自检结束时必须原样还回去）
+            var start = ItemMaterializer.observedSnapshot();
+            int startSize = start.size();
+
+            DimensionsNet keeper = new DimensionsNet(true);
+            ItemMaterializer.observe(keeper);
+            // 快照里包含 keeper。之后的 throwaway 只通过 refresh 进入（refresh 内部会 observe）。
+            var withKeeper = ItemMaterializer.observedSnapshot();
+
+            DimensionsNet throwaway = new DimensionsNet(true);
+            ItemMaterializer.refresh(throwaway);
+
+            boolean bothIn = ItemMaterializer.observedSnapshot().contains(keeper)
+                    && ItemMaterializer.observedSnapshot().contains(throwaway);
+
+            // ① 还原到 withKeeper：keeper（在快照里）必须保留，throwaway（快照之后）必须移除
+            ItemMaterializer.restoreObserved(withKeeper);
+            var afterFirst = ItemMaterializer.observedSnapshot();
+            boolean keeperKept = afterFirst.contains(keeper);
+            boolean throwawayGone = !afterFirst.contains(throwaway);
+
+            // ② 再还原到 start：keeper 是本次用例引入的，也必须被移除 ⇒ 整轮自检零副作用
+            ItemMaterializer.restoreObserved(start);
+            var afterSecond = ItemMaterializer.observedSnapshot();
+            boolean zeroLeak = !afterSecond.contains(keeper) && !afterSecond.contains(throwaway)
+                    && afterSecond.size() == startSize;
+
+            if (bothIn && keeperKept && throwawayGone && zeroLeak) {
+                ok[0]++;
+                out.add("OK   诊断隔离：restoreObserved 精确移除「快照之后登记」的网络、保留「快照内」的网络；"
+                        + "用例收尾后已观测集合回到 " + startSize + " 个（自检不留全局副作用"
+                        + " ⇒ 真实网络的物化日志不会被挤出上限）");
+            } else {
+                out.add("FAIL 诊断隔离：bothIn=" + bothIn + " keeperKept=" + keeperKept
+                        + " throwawayGone=" + throwawayGone + " zeroLeak=" + zeroLeak
+                        + "（size " + startSize + " → " + afterSecond.size() + "）");
+            }
+        } catch (Throwable t) {
+            out.add("FAIL 诊断隔离：" + t);
+        }
+    }
 
     /** 1. 类型必须在注册表里，且取回的是同一个原型单例（否则读档会静默丢条目）。 */
     private static void typeRegistration(List<String> out, int[] ok) {

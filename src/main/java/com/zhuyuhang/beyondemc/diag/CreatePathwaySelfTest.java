@@ -37,6 +37,7 @@ public final class CreatePathwaySelfTest {
         int[] ok = {0};
 
         bucketSeparation(out, ok);
+        exposedAmountInvariant(out, ok);
         deliverableBoundaries(out, ok);
         deliverableMatchesChargeFormula(out, ok);
         displayStackClamping(out, ok);
@@ -44,6 +45,51 @@ public final class CreatePathwaySelfTest {
 
         out.add("---- Create/第三方暴露（0.3.2）自检结果：" + ok[0] + " 项通过 ----");
         return out;
+    }
+
+    // ------------------------------------------------------------------
+
+    /**
+     * 0b. 回归：**对外报量绝不能要求「物化条目存在」**（0.3.2 实测缺陷）。
+     *
+     * <p>缺陷现场：存档里 15 项已学习、只有 14 条物化条目（缺 {@code minecraft:gunpowder}），
+     * 而蓝图大炮恒定需要火药 —— 大炮报"无库存"，其实一取就能取到。
+     * 根因是暴露路径当时写成 {@code policy.deliverable(count, 物化条目量)}，
+     * 把"派生数据存在"当成了交付前提；而真实交付（扣 EMC + 当场铸造）根本不看条目。
+     *
+     * <p>这一条把修好的不变式钉死：<b>余额够 + 策略放行 ⇒ 必须报得出量</b>，
+     * 与条目有无、条目多少完全无关。
+     */
+    private static void exposedAmountInvariant(List<String> out, int[] ok) {
+        try {
+            long[] wants = {-1L, 0L, 1L, 64L, 100L, 101L, Long.MAX_VALUE};
+            long[] affordables = {-1L, 0L, 1L, 64L, 100L};
+            boolean[] alloweds = {true, false};
+
+            int checked = 0;
+            for (long want : wants) {
+                for (long affordable : affordables) {
+                    for (boolean allowed : alloweds) {
+                        long got = MaterializeQuote.exposedAmount(want, affordable, allowed);
+                        // 不变式：报得出量 ⟺ 策略放行 ∧ 有需求 ∧ 余额买得起；此时取两者的较小者
+                        boolean shouldBePositive = allowed && want > 0L && affordable > 0L;
+                        long expected = shouldBePositive ? Math.min(want, affordable) : 0L;
+                        if (got != expected) {
+                            out.add("FAIL 对外报量不变式：want=" + want + " affordable=" + affordable
+                                    + " allowed=" + allowed + " → " + got + "（期望 " + expected + "）");
+                            return;
+                        }
+                        checked++;
+                    }
+                }
+            }
+            ok[0]++;
+            out.add("OK   对外报量不变式：" + checked + " 组（want × 余额 × 策略）全部满足"
+                    + "「报得出量 ⟺ 策略放行 ∧ 有需求 ∧ 余额买得起」—— 算式里**没有**物化条目这一项，"
+                    + "即条目缺失也不可能把量压成 0（0.3.2 实测缺陷的回归）");
+        } catch (Throwable t) {
+            out.add("FAIL 对外报量不变式：" + t);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -72,41 +118,31 @@ public final class CreatePathwaySelfTest {
     }
 
     /**
-     * 1. {@link MaterializeQuote.Policy#deliverable} 的边界。
-     *
-     * <p>用直接构造 Policy 的方式测纯算式，不触碰 EMC 表 / 网络 / 配置。
+     * 1. {@link MaterializeQuote#exposedAmount} 的边界（纯算式，不触碰 EMC 表 / 网络 / 配置）。
      */
     private static void deliverableBoundaries(List<String> out, int[] ok) {
         try {
-            MaterializeQuote.Policy rich = new MaterializeQuote.Policy(
-                    ItemInfo.fromItem(Items.DIAMOND), 8192L, 8192L * 1000L, 1000L);
+            long affordable = 1000L;
 
-            long a = rich.deliverable(0L, 500L);          // 不要 → 0
-            long b = rich.deliverable(64L, 0L);           // 没有物化条目 → 0
-            long c = rich.deliverable(64L, 500L);         // 物化量够 → 取需求
-            long d = rich.deliverable(64L, 10L);          // 物化量不够 → 取物化量
-            long e = rich.deliverable(2000L, 500L);       // 需求大于物化量且大于余额份额 → 取小者
-            long f = rich.deliverable(-5L, 500L);         // 负需求 → 0
-            long g = rich.deliverable(64L, -5L);          // 负物化量 → 0
+            long a = MaterializeQuote.exposedAmount(0L, affordable, true);      // 不要 → 0
+            long c = MaterializeQuote.exposedAmount(64L, affordable, true);     // 取需求
+            long d = MaterializeQuote.exposedAmount(64L, 10L, true);            // 受余额限 → 10
+            long e = MaterializeQuote.exposedAmount(2000L, affordable, true);   // 需求大于余额 → 余额
+            long f = MaterializeQuote.exposedAmount(-5L, affordable, true);     // 负需求 → 0
+            long g = MaterializeQuote.exposedAmount(64L, -5L, true);            // 负余额 → 0
+            long i = MaterializeQuote.exposedAmount(64L, 0L, true);             // 余额买不起（affordable=0）→ 0
+            long j = MaterializeQuote.exposedAmount(Long.MAX_VALUE, Long.MAX_VALUE, true); // 饱和不溢出
 
-            boolean pass = a == 0L && b == 0L && c == 64L && d == 10L && e == 500L && f == 0L && g == 0L;
+            boolean pass = a == 0L && c == 64L && d == 10L && e == 1000L
+                    && f == 0L && g == 0L && i == 0L && j == Long.MAX_VALUE;
             if (pass) {
                 ok[0]++;
-                out.add("OK   报价边界：不要=0 / 无条目=0 / 取需求=64 / 受物化量限=10 / 受余额限=500 / 负数=0");
+                out.add("OK   报价边界：不要=0 / 取需求=64 / 受余额限=10 / 取余额=1000 / 负数=0 / "
+                        + "买不起=0 / MAX 不溢出");
             } else {
-                out.add("FAIL 报价边界：a=" + a + " b=" + b + " c=" + c + " d=" + d
-                        + " e=" + e + " f=" + f + " g=" + g + "（期望 0/0/64/10/500/0/0）");
-            }
-
-            // 余额不足：affordable = 0 ⇒ 一律交付 0（"不交半份"）
-            MaterializeQuote.Policy broke = new MaterializeQuote.Policy(
-                    ItemInfo.fromItem(Items.DIAMOND), 8192L, 100L, 0L);
-            long h = broke.deliverable(64L, 500L);
-            if (h == 0L) {
-                ok[0]++;
-                out.add("OK   余额不足：可负担份数为 0 时交付 0（不交半份）");
-            } else {
-                out.add("FAIL 余额不足：交付了 " + h + " 份（期望 0）");
+                out.add("FAIL 报价边界：a=" + a + " c=" + c + " d=" + d + " e=" + e
+                        + " f=" + f + " g=" + g + " i=" + i + " j=" + j
+                        + "（期望 0/64/10/1000/0/0/0/MAX）");
             }
         } catch (Throwable t) {
             out.add("FAIL 报价边界：" + t);
@@ -117,9 +153,8 @@ public final class CreatePathwaySelfTest {
      * 2. 「模拟报量」与「真实扣费」必须同算式。
      *
      * <p>真实扣费段在 {@code InterfaceWithdrawService} 里用的是
-     * {@code want = min(请求量, 余额 / 购买价)}（那里物化量不设限，所以传 {@code Long.MAX_VALUE}）。
-     * 这里把同一算式跑一遍，确认报价器给出相同的数 —— 两条暴露路径与网络接口
-     * **永远不会分叉**，这正是把判断链收口到 {@code MaterializeQuote} 的目的。
+     * {@code want = min(请求量, 余额 / 购买价)}。这里把同一算式跑一遍，确认报价器给出相同的数
+     * —— 两条暴露路径与网络接口**永远不会分叉**，这正是把判断链收口到 {@code MaterializeQuote} 的目的。
      */
     private static void deliverableMatchesChargeFormula(List<String> out, int[] ok) {
         try {
@@ -132,10 +167,7 @@ public final class CreatePathwaySelfTest {
                     for (long want : wants) {
                         long affordable = balance / price;
                         long expected = Math.min(want, affordable);
-                        MaterializeQuote.Policy p =
-                                new MaterializeQuote.Policy(null, price, balance, affordable);
-                        // 传 Long.MAX_VALUE 等价于"不受物化量限制"，与收费段一致
-                        long actual = p.deliverable(want, Long.MAX_VALUE);
+                        long actual = MaterializeQuote.exposedAmount(want, affordable, true);
                         if (actual != expected) {
                             out.add("FAIL 算式一致：price=" + price + " balance=" + balance
                                     + " want=" + want + " → 报价 " + actual + "，收费段 " + expected);

@@ -25,6 +25,7 @@ import com.zhuyuhang.beyondemc.exchange.KnowledgeLearnedPacket;
 import com.zhuyuhang.beyondemc.exchange.KnowledgeSyncPacket;
 import com.zhuyuhang.beyondemc.exchange.InterfaceWithdrawService;
 import com.zhuyuhang.beyondemc.knowledge.NetKnowledgeStore;
+import com.zhuyuhang.beyondemc.materialize.ItemMaterializer;
 import moze_intel.projecte.api.ItemInfo;
 import moze_intel.projecte.api.proxy.IEMCProxy;
 import net.minecraft.server.level.ServerPlayer;
@@ -42,6 +43,7 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Beyond EMC 主类。
@@ -196,49 +198,59 @@ public class BeyondEmc {
      * 阶段 5 起可以删掉，改为 GameTest。
      */
     private void onServerStarted(ServerStartedEvent event) {
-        LOGGER.info("[BeyondEMC] ===== 自检开始 =====");
-        LOGGER.info("[BeyondEMC] EMC 表就绪={}，remap 次数={}",
-                EmcAvailability.isReady(), EmcAvailability.remapCount());
-        LOGGER.info("[BeyondEMC] ---- 存储层（阶段 2）----");
-        for (String line : EmcStorageSelfTest.run(event.getServer().registryAccess())) {
-            LOGGER.info("[BeyondEMC] {}", line);
+        // 自检用 new DimensionsNet(true) 造临时网络。若不隔离，它们会被登记进 ItemMaterializer
+        // 的全局「已观测网络」集合，此后每次 refreshAll 都要为一批死网络空转一整遍，
+        // 还会把真实网络那条「物化（第 N 次）」日志挤出 LOG_FIRST_N 的上限 —— 实测排查本缺陷时
+        // 唯一想看的那行恰恰因此不可见。这里保证自检零全局副作用（详见 observedSnapshot 的说明）。
+        Set<DimensionsNet> observedBefore = ItemMaterializer.observedSnapshot();
+        try {
+            LOGGER.info("[BeyondEMC] ===== 自检开始 =====");
+            LOGGER.info("[BeyondEMC] EMC 表就绪={}，remap 次数={}",
+                    EmcAvailability.isReady(), EmcAvailability.remapCount());
+            LOGGER.info("[BeyondEMC] ---- 存储层（阶段 2）----");
+            for (String line : EmcStorageSelfTest.run(event.getServer().registryAccess())) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- 折算与学习集（阶段 3）----");
+            for (String line : Phase3SelfTest.run(event.getServer().registryAccess())) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- 兑换服务（阶段 4）----");
+            for (String line : Phase4SelfTest.run()) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- 物化：物品真实存在于网络中（0.3.0）----");
+            for (String line : com.zhuyuhang.beyondemc.diag.MaterializeSelfTest.run(event.getServer().registryAccess())) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- 策略与配置（阶段 6）----");
+            for (String line : Phase6SelfTest.run()) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- Mixin 目标存活性（阶段 7：防 BD 升级后静默失效）----");
+            for (String line : MixinTargetCheck.run()) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- 网络接口兑换（自动化向）----");
+            for (String line : InterfaceWithdrawSelfTest.run()) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- 兑换物品吸附到鼠标（0.2.0）----");
+            for (String line : CursorPickupSelfTest.run()) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- JEI 配方填充可用量（0.2.0，不依赖 JEI 存在）----");
+            for (String line : JeiFillSelfTest.run()) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ---- 第三方暴露：Create 蓝图接口 / 通用物品能力桥（0.3.2）----");
+            for (String line : com.zhuyuhang.beyondemc.diag.CreatePathwaySelfTest.run()) {
+                LOGGER.info("[BeyondEMC] {}", line);
+            }
+            LOGGER.info("[BeyondEMC] ===== 自检结束 =====");
+        } finally {
+            // 只移除自检期间新登记的临时网络；快照之前就存在的（真实网络）一律保留。
+            ItemMaterializer.restoreObserved(observedBefore);
         }
-        LOGGER.info("[BeyondEMC] ---- 折算与学习集（阶段 3）----");
-        for (String line : Phase3SelfTest.run(event.getServer().registryAccess())) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ---- 兑换服务（阶段 4）----");
-        for (String line : Phase4SelfTest.run()) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ---- 物化：物品真实存在于网络中（0.3.0）----");
-        for (String line : com.zhuyuhang.beyondemc.diag.MaterializeSelfTest.run(event.getServer().registryAccess())) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ---- 策略与配置（阶段 6）----");
-        for (String line : Phase6SelfTest.run()) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ---- Mixin 目标存活性（阶段 7：防 BD 升级后静默失效）----");
-        for (String line : MixinTargetCheck.run()) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ---- 网络接口兑换（自动化向）----");
-        for (String line : InterfaceWithdrawSelfTest.run()) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ---- 兑换物品吸附到鼠标（0.2.0）----");
-        for (String line : CursorPickupSelfTest.run()) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ---- JEI 配方填充可用量（0.2.0，不依赖 JEI 存在）----");
-        for (String line : JeiFillSelfTest.run()) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ---- 第三方暴露：Create 蓝图接口 / 通用物品能力桥（0.3.2）----");
-        for (String line : com.zhuyuhang.beyondemc.diag.CreatePathwaySelfTest.run()) {
-            LOGGER.info("[BeyondEMC] {}", line);
-        }
-        LOGGER.info("[BeyondEMC] ===== 自检结束 =====");
     }
 }

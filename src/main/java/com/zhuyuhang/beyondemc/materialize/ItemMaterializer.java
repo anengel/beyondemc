@@ -56,9 +56,27 @@ public final class ItemMaterializer {
     private static final Set<DimensionsNet> OBSERVED =
             Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
 
-    /** 已排入 tick 队列、等待刷新的网络（用于合并同一 tick 内的多次触发）。 */
-    private static final Set<DimensionsNet> PENDING =
-            Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+    /** 已排入 tick 队列、等待刷新的网络 → 排队时刻（毫秒）。用于合并同一 tick 内的多次触发。 */
+    private static final Map<DimensionsNet, Long> PENDING =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    /**
+     * 排队多久还没跑，就认定那个队列任务已被丢弃，允许重新排队（毫秒）。
+     *
+     * <h2>为什么必须有这个超时（0.3.2 实测缺陷的直接教训）</h2>
+     * 原实现是"用 {@code Set} 去重，由队列任务负责清除标记"。这条链路有个可以证实的缺口：
+     * 若 {@code server.execute(...)} 提交的任务<b>没能被执行</b>（服务端正在停止、执行器已关等），
+     * 标记就<b>永久留在集合里</b>，此后<b>每一次</b> {@code scheduleRefresh} 都会在
+     * {@code if (!PENDING.add(net)) return;} 处静默返回 —— 物化层从此冻结，且没有任何日志。
+     *
+     * <p>实测现象与之吻合：存档里 15 项已学习、只有 14 条物化条目，缺的
+     * {@code minecraft:gunpowder} 恰好是在最后一次成功重算<b>之后</b>才学会的
+     * （日志最后一次重算 EMC=3066234 → 14 条，此后到退出再无任何重算）。
+     *
+     * <p>一个 tick 是 50 ms，正常任务在 1 个 tick 内就会跑掉；取 2 秒作为"任务已丢失"的判据
+     * —— 远大于正常延迟，又能让被冻结的物化层在<b>下一次触发时</b>自愈，并留下 WARN 证据。
+     */
+    private static final long PENDING_STALE_MS = 2_000L;
 
     private static final AtomicLong REFRESH_COUNT = new AtomicLong();
     private static final AtomicLong LOGGED = new AtomicLong();
@@ -125,24 +143,34 @@ public final class ItemMaterializer {
             return;
         }
         observe(net);
-        if (!PENDING.add(net)) {
-            return; // 已经排过，等它跑
+        long now = System.currentTimeMillis();
+        Long queuedAt = PENDING.get(net);
+        if (queuedAt != null && now - queuedAt < PENDING_STALE_MS) {
+            return; // 已经排过，等它跑（同一 tick 内的多次触发合并成一次）
         }
+        if (queuedAt != null) {
+            // 只有"任务被丢弃"才会走到这里。留痕，否则这种失效是完全无声的（见 PENDING_STALE_MS 注释）
+            BeyondEmc.LOGGER.warn("[BeyondEMC] 网络 {} 的上一次物化刷新排了 {} ms 仍未执行，"
+                            + "判定队列任务已丢失，重新排队（此前物化层是陈旧的）",
+                    net.getId(), now - queuedAt);
+        }
+        PENDING.put(net, now);
         try {
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             if (server == null) {
-                PENDING.remove(net);
-                refresh(net);
+                runPending(net);
                 return;
             }
-            server.execute(() -> {
-                PENDING.remove(net);
-                refresh(net);
-            });
+            server.execute(() -> runPending(net));
         } catch (Throwable t) {
-            PENDING.remove(net);
-            refresh(net);
+            runPending(net);
         }
+    }
+
+    /** 队列任务体：先清标记再重算（顺序不能反，否则重算期间的新触发会被吞掉）。 */
+    private static void runPending(DimensionsNet net) {
+        PENDING.remove(net);
+        refresh(net);
     }
 
     /**
@@ -421,6 +449,65 @@ public final class ItemMaterializer {
             return storage.getStackByKey(key).amount();
         } catch (Throwable t) {
             return 0L;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 诊断隔离（自检不得留下全局副作用）
+    // ------------------------------------------------------------------
+
+    /**
+     * 诊断用：取当前「已观测网络」集合的快照（身份语义，与 {@link #OBSERVED} 一致）。
+     *
+     * <h2>为什么需要它（0.3.2 排查现场的直接教训）</h2>
+     * 自检会用 {@code new DimensionsNet(true)} 造一批<b>临时网络</b>去验证物化数学与写回。
+     * 这些临时网络只要经过 {@link #refresh} / {@link #scheduleRefresh}，就会被 {@link #observe}
+     * 登记进全局的 {@link #OBSERVED}，<b>此后一直留在里面</b>（直到被 GC）。
+     *
+     * <p>后果不是算错，而是<b>看不见</b>：实测一次 {@code /reload} 触发的 {@link #refreshAll}
+     * 连打 8 条「物化（第 N 次）」日志，全部是 {@code EMC=0} 的临时网络
+     * （{@code getId()} 也都是 0，与真实网络混在一起无法分辨），把<b>真实网络那一条挤到了
+     * {@link #LOG_FIRST_N} 的上限之外</b>。排查"为什么大炮看不到某材料"时，唯一想看的那行
+     * 「网络 0 EMC=3066234 → 15 条物化条目」恰恰不在日志里 —— 这类"静默"是本缺陷最难查的部分。
+     *
+     * <p>用法：自检开始前 {@code Set<DimensionsNet> before = observedSnapshot();}，
+     * 结束的 {@code finally} 里 {@link #restoreObserved}(before)。
+     */
+    public static Set<DimensionsNet> observedSnapshot() {
+        Set<DimensionsNet> copy = Collections.newSetFromMap(new IdentityHashMap<>());
+        try {
+            synchronized (OBSERVED) {
+                copy.addAll(OBSERVED);
+            }
+        } catch (Throwable ignored) {
+            // 取不到快照只影响自检的"零副作用"，不影响任何正确性
+        }
+        return copy;
+    }
+
+    /**
+     * 诊断用：把已观测集合还原成 {@code snapshot}（移除自检期间新登记的临时网络），
+     * 一并撤掉它们的排队标记。只做"删除",不添加 —— 快照之前就存在的网络一律保留。
+     */
+    public static void restoreObserved(@Nullable Set<DimensionsNet> snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        try {
+            List<DimensionsNet> drop = new ArrayList<>();
+            synchronized (OBSERVED) {
+                for (DimensionsNet net : OBSERVED) {
+                    if (!snapshot.contains(net)) { // snapshot 是身份集合 ⇒ contains 按身份判
+                        drop.add(net);
+                    }
+                }
+                for (DimensionsNet net : drop) {
+                    OBSERVED.remove(net);
+                    PENDING.remove(net);
+                }
+            }
+        } catch (Throwable ignored) {
+            // 还原失败只影响日志洁净度，不影响任何正确性
         }
     }
 

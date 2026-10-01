@@ -57,8 +57,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * {@link com.zhuyuhang.beyondemc.exchange.InterfaceWithdrawService} 的
  * 「扣 EMC + 铸造」链。<b>绝不直接改桶</b> —— 那会重开 {@code S-0.3-7} 的零扣费缺口。
  *
- * <p>模拟抽取只读存储、只算数量（{@link MaterializeQuote}），不产生任何副作用，
+ * <p>模拟抽取只读存储、只算数量（{@link MaterializeQuote#externalDeliverable}，
+ * 与真实扣费段同一入口、同一判据链、同一算式），不产生任何副作用，
  * 与 0.2 立下的「模拟绝不扣费」红线不冲突。
+ *
+ * <h2>⚠️ 报量与显示都不能要求「物化条目存在」</h2>
+ * 本类初版用 {@code policy.deliverable(count, materializedAmount(...))}，即额外要求
+ * "该物品有一条物化条目"。但真实交付（{@code InterfaceWithdrawService} 的扣 EMC + 当场铸造）
+ * <b>完全不看条目</b>，而条目是派生数据、允许合法缺失（{@code MaterializeMath.solve} 会跳过
+ * "当前有真实库存"的物品，此后若真实库存被取走而没有触发重算，条目就一直缺失）。
+ * 那会让模拟比真实更严 —— 表现为"看得见的东西取不到"或"取得到的东西看不见"。
+ *
+ * <p>现在统一走 {@link MaterializeQuote#externalDeliverable}。
+ * 注意本类这段区段的<b>槽位本身</b>仍然来自物化桶（{@code getSlots() = base + 桶大小}）——
+ * 也就是说：桶里没有条目的物品，在这条能力桥上<b>仍然没有槽位</b>。
+ * 让条目及时跟上权威数据由 {@code ItemMaterializer} 的触发点负责
+ * （0.3.2 补上了"真实库存被取走"这一处）。
  *
  * <h2>⚠️ 为什么只动这一个类，不动它的「有序版」兄弟</h2>
  * BD 有两套能力体系，名字很像但完全不同：
@@ -205,10 +219,11 @@ public abstract class ItemUnifiedStorageHandlerMixin {
             }
             ItemInfo info = key.info();
             // 与「能不能真取出来」用同一套判据：不可交付就不显示，避免"看得见取不到"的假象
-            if (MaterializeQuote.policy(net, info) == null) {
+            long amount = MaterializeQuote.externalDeliverable(net, info, Long.MAX_VALUE);
+            if (amount <= 0L) {
                 return ItemStack.EMPTY;
             }
-            return MaterializeQuote.displayStack(info, MaterializeQuote.materializedAmount(net, info));
+            return MaterializeQuote.displayStack(info, amount);
         } catch (Throwable t) {
             return ItemStack.EMPTY;
         }
@@ -217,7 +232,7 @@ public abstract class ItemUnifiedStorageHandlerMixin {
     /**
      * 抽取物化槽。
      *
-     * <p>模拟：只算量（{@link MaterializeQuote.Policy#deliverable}，与真实扣费同一算式）。
+     * <p>模拟：只算量（{@link MaterializeQuote#externalDeliverable}，与真实扣费同一入口、同一算式）。
      * <br>真实：导回 {@code UnifiedStorage.extract(ItemStackKey, …)} → 命中扣费铸造链。
      */
     @Unique
@@ -241,11 +256,8 @@ public abstract class ItemUnifiedStorageHandlerMixin {
             ItemInfo info = key.info();
 
             if (sim) {
-                MaterializeQuote.Policy policy = MaterializeQuote.policy(net, info);
-                if (policy == null) {
-                    return ItemStack.EMPTY;
-                }
-                long give = policy.deliverable(count, MaterializeQuote.materializedAmount(net, info));
+                // 与 InterfaceWithdrawService 同源：不看物化条目量，只看余额与策略
+                long give = MaterializeQuote.externalDeliverable(net, info, count);
                 return MaterializeQuote.displayStack(info, give);
             }
 

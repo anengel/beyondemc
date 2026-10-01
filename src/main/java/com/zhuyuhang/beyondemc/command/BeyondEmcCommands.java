@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet;
+import com.zhuyuhang.beyondemc.config.BeyondEmcConfig;
 import com.zhuyuhang.beyondemc.core.EmcAvailability;
 import com.zhuyuhang.beyondemc.diag.EmcStorageSelfTest;
 import com.zhuyuhang.beyondemc.diag.MaterializeSelfTest;
@@ -17,6 +18,7 @@ import com.zhuyuhang.beyondemc.emc.NetEmcAccessor;
 import com.zhuyuhang.beyondemc.exchange.ExchangeService;
 import com.zhuyuhang.beyondemc.knowledge.NetKnowledgeStore;
 import com.zhuyuhang.beyondemc.materialize.ItemMaterializer;
+import com.zhuyuhang.beyondemc.materialize.MaterializeQuote;
 import moze_intel.projecte.api.ItemInfo;
 import moze_intel.projecte.api.proxy.IEMCProxy;
 import net.minecraft.commands.CommandBuildContext;
@@ -66,7 +68,10 @@ public final class BeyondEmcCommands {
                 .then(Commands.literal("materialize")
                         .then(Commands.literal("list").executes(BeyondEmcCommands::materializeList))
                         .then(Commands.literal("rebuild").executes(BeyondEmcCommands::materializeRebuild))
-                        .then(Commands.literal("clear").executes(BeyondEmcCommands::materializeClear))));
+                        .then(Commands.literal("clear").executes(BeyondEmcCommands::materializeClear)))
+                .then(Commands.literal("why")
+                        .then(Commands.argument("item", ItemArgument.item(buildContext))
+                                .executes(BeyondEmcCommands::why))));
     }
 
     // ------------------------------------------------------------------
@@ -285,6 +290,101 @@ public final class BeyondEmcCommands {
         source.sendSuccess(msg("已清空网络 " + net.getId() + " 的物化条目（" + cleared + " 类）。"
                 + "注意：任何一次 EMC 变化或打开界面都会按权威数据重新生成它们（这是设计如此）"), true);
         return 1;
+    }
+
+    /**
+     * {@code /beyondemc why <item>} —— 逐条打印"这个物品现在能不能被取用、卡在哪一道闸"。
+     *
+     * <h2>为什么需要它</h2>
+     * 0.3.2 收到过一条实测反馈：「蓝图大炮的清单只有部分材料满足条件，部分显示无库存」。
+     * 在实机上看，这两种状态**长得一模一样** —— 大炮只显示"无库存"，不告诉你原因。
+     * 而原因至少有六种，且分属完全不同的处理方向：
+     * <ul>
+     *   <li><b>未学习</b>（网络学习集合里没有）→ 把该物品存进网络即可（存入即折算即学习）；</li>
+     *   <li><b>无 EMC 价值</b>（ProjectE 表里是 0）→ 设计如此，永远取不到；</li>
+     *   <li><b>余额不足</b>（单价 &gt; 网络 EMC）→ 往网络里存 EMC 即可；</li>
+     *   <li><b>被黑白名单 / 组件策略排除</b>→ 改配置；</li>
+     *   <li><b>已有真实库存</b>→ 走 BD 原生行，本来就能取；</li>
+     *   <li><b>物化条目缺失</b>→ 派生数据暂时陈旧，<b>不影响取用</b>（0.3.2 起已如此）。</li>
+     * </ul>
+     *
+     * <p>本命令把这几条逐条打印，最后给出结论 —— 结论<b>只由
+     * {@link MaterializeQuote#externalDeliverable} 给出</b>（与真实扣费同一入口），
+     * 中间几行只是解释为什么。这样命令的输出不可能与真实行为分叉。
+     */
+    private static int why(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        CommandSourceStack source = ctx.getSource();
+        DimensionsNet net = requireNet(source);
+        if (net == null) {
+            return 0;
+        }
+
+        ItemStack template = ItemArgument.getItem(ctx, "item").createItemStack(1, false);
+        source.sendSuccess(msg("问：" + template.getItem() + " 现在能不能被取用？"), false);
+
+        // ① 归一化身份
+        var resolved = com.zhuyuhang.beyondemc.exchange.CanonicalExchange.resolve(template);
+        if (resolved == null) {
+            source.sendFailure(Component.literal("[BeyondEMC] 结论：身份归一化失败 —— "
+                    + "ProjectE 得不到稳定身份，一律不可取用（防刷物品）"));
+            return 0;
+        }
+        ItemInfo info = resolved.info();
+        source.sendSuccess(msg("① 归一化身份：" + info + "（定价与铸造都按这个身份）"), false);
+
+        // ②③ 配置与学习
+        boolean ready = EmcAvailability.isReady();
+        boolean knows = NetKnowledgeStore.knows(net, info);
+        source.sendSuccess(msg("② 配置：允许接口/第三方取用=" + BeyondEmcConfig.allowInterfaceWithdraw()
+                + "；EMC 表就绪=" + ready + (ready ? "" : "（尚无人登录或未 /reload，此时一律不可取用）")), false);
+        boolean needKnow = BeyondEmcConfig.exchangeRequiresKnowledge();
+        source.sendSuccess(msg("③ 要求已学习=" + needKnow + "；本网络已学习=" + knows
+                + (needKnow && !knows ? "   ← 未学习：把该物品**存进这个网络**即可学会（存入即折算、即学习）" : "")), false);
+
+        // ④ 价格与余额
+        long price;
+        try {
+            price = IEMCProxy.INSTANCE.getValue(info);
+        } catch (Throwable t) {
+            price = -1L;
+        }
+        long balance = NetEmcAccessor.getEmc(net);
+        String affordableText = price > 0L ? String.valueOf(balance / price) : "—（无价 ⇒ 永远取不到）";
+        source.sendSuccess(msg("④ 购买价=" + price + "；网络 EMC=" + balance
+                + "；余额可买 " + affordableText + " 份"), false);
+
+        // ⑤ 存入侧策略（与收费段同源）
+        String skip;
+        try {
+            skip = EmcDepositHandler.skipReason(info.createStack());
+        } catch (Throwable t) {
+            skip = "身份取不出物品";
+        }
+        source.sendSuccess(msg("⑤ 存入侧策略：" + (skip == null ? "放行" : "拒绝（" + skip + "）")
+                + "   ← 拒绝则兑换侧也绝不铸造，第三方会一直等不到料"), false);
+
+        // ⑥ 现状快照
+        long real = -1L;
+        try {
+            real = net.getUnifiedStorage().getStackByKey(
+                    new com.wintercogs.beyonddimensions.api.storage.key.impl.ItemStackKey(info.createStack()))
+                    .amount();
+        } catch (Throwable ignored) {
+            // 查不到就显示 -1，不影响结论
+        }
+        long entry = MaterializeQuote.materializedAmount(net, info);
+        source.sendSuccess(msg("⑥ 现状：真实库存=" + real + "；物化条目=" + entry
+                + "（条目只是派生数据，缺失/偏少都不影响取用）"), false);
+
+        // ⑦ 结论 —— 只由 unique 入口给出
+        long exposed = MaterializeQuote.externalDeliverable(net, info, 64L);
+        if (exposed > 0L) {
+            source.sendSuccess(msg("结论：OK   第三方（蓝图大炮 / 管道 / 总线）会看到 " + exposed + " 份"), true);
+            return 1;
+        }
+        source.sendFailure(Component.literal("[BeyondEMC] 结论：第三方会报「无库存」。"
+                + "上面 ②③④⑤ 里第一条不成立的就是原因；若全绿，请用 /beyondemc materialize list 对照应然条目"));
+        return 0;
     }
 
     /**

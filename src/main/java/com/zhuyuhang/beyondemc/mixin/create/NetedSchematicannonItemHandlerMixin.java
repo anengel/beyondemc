@@ -45,12 +45,28 @@ import java.util.List;
  * <h2>⚠️ 两条红线</h2>
  * <ol>
  *   <li><b>模拟路径绝不产生任何副作用</b>：本类只读存储、只算数量，不扣 EMC、不写存储。
- *       数量上限取自 {@link MaterializeQuote.Policy#deliverable}，与真实扣费段
- *       <b>同一个算式</b>，因此不会"模拟报得比真能给的多"。</li>
+ *       数量一律取自 {@link MaterializeQuote#externalDeliverable} —— 它与真实扣费段
+ *       <b>同一个入口、同一条判据链、同一个算式</b>，因此既不会"模拟报得比真能给的多"
+ *       （那会让大炮卡在永远等料），也不会"给得比报得多"（那是零扣费交付）。</li>
  *   <li><b>真抽取不改</b>：绝不在这里直接交付物品 —— 那会绕过收费链，重开
  *       {@code S-0.3-7} 的零扣费缺口。真交付只能发生在 BD 的原生
  *       {@code extractItem} 里，经由 {@code UnifiedStorage.extract}。</li>
  * </ol>
+ *
+ * <h2>⚠️ 0.3.2 实测缺陷：报量绝不能要求"物化条目存在"</h2>
+ * 本类最初写的是 {@code policy.deliverable(count, MaterializeQuote.materializedAmount(...))}
+ * —— 也就是额外要求"该物品在网络里有一条物化条目"。但<b>真实交付不依赖条目</b>：
+ * {@code InterfaceWithdrawService} 是"扣 EMC + 当场铸造"，它用
+ * {@code policy.deliverable(amount, Long.MAX_VALUE)}，只受余额约束。
+ *
+ * <p>而条目是派生数据、<b>允许合法地缺失</b>：{@code MaterializeMath.solve} 会跳过
+ * "当前有真实库存"的物品（避免与 BD 原生行重复），若此后真实库存被取走而没有触发重算，
+ * 条目就一直缺失。存档实证（2026-10-01）：网络里 15 项已学习、只有 14 条物化条目，
+ * 缺的正是 {@code minecraft:gunpowder} —— 而火药是蓝图大炮**恒定需要**的材料。
+ * 于是大炮对火药报"无库存"，其实一取就能取到（模拟比真实更严）。
+ *
+ * <p>现在改为统一走 {@link MaterializeQuote#externalDeliverable}，
+ * 显示与模拟抽取共用同一入口，不再看条目。
  *
  * <p>另：{@code getSlots()} <b>刻意不注入</b> —— {@code allSchematicannonItems} 快照
  * 本来就包含 checklist 里的全部物品（不看网络有没有），槽位数已经覆盖，无需改动。
@@ -118,14 +134,11 @@ public abstract class NetedSchematicannonItemHandlerMixin {
             if (resolved == null) {
                 return; // 身份归一失败 → 保守报"没料"
             }
-            MaterializeQuote.Policy policy = MaterializeQuote.policy(this.net, resolved.info());
-            if (policy == null) {
-                return; // 策略层不允许（未学习 / 买不到价 / 配置关闭）→ 报"没料"
-            }
-            long amount = MaterializeQuote.materializedAmount(this.net, resolved.info());
-            long give = policy.deliverable(count, amount);
+            // 统一入口：与 InterfaceWithdrawService 的真实扣费段同一条判据链、同一个算式。
+            // 刻意**不**再看"物化条目量" —— 条目是派生数据、允许缺失，而真实交付不看它。
+            long give = MaterializeQuote.externalDeliverable(this.net, resolved.info(), count);
             if (give <= 0L) {
-                return;
+                return; // 策略层不允许（未学习 / 无价 / 余额不足 / 被存入侧筛选排除）→ 报"没料"
             }
             // 数量夹在 [1, 原版堆叠数]：物化量可能有上百万，直接塞进 ItemStack 会越界/显示错乱
             ItemStack out = MaterializeQuote.displayStack(resolved.info(), give);
@@ -140,8 +153,11 @@ public abstract class NetedSchematicannonItemHandlerMixin {
     /**
      * 取该槽对应的「物化条目」显示栈；没有则返回空栈。
      *
-     * <p>数量恒定在 {@code min(物化量, 原版堆叠数)}：物化量可能有上百万，
-     * 直接把 {@code int} 数量塞给第三方容器会引发越界与显示错乱。
+     * <p>数量用 {@link MaterializeQuote#externalDeliverable}（"最多能取多少"）而不是物化条目量：
+     * 显示与模拟抽取必须同源，否则会出现类注释所述的那种自相矛盾
+     * （抽取说有料、显示却一直是 0，或反之）。返回值再被 {@link MaterializeQuote#displayStack}
+     * 夹到 {@code [1, 原版堆叠数]} —— 物化量可能有上百万，直接把 {@code int} 数量交给第三方容器
+     * 会引发越界与显示错乱。
      */
     @Unique
     private ItemStack beyondemc$materializedStack(int slot) {
@@ -160,7 +176,8 @@ public abstract class NetedSchematicannonItemHandlerMixin {
             if (resolved == null) {
                 return ItemStack.EMPTY;
             }
-            long amount = MaterializeQuote.materializedAmount(this.net, resolved.info());
+            // want = 不限（要的就是"一共有多少可用"），由 displayStack 负责夹到堆叠上限
+            long amount = MaterializeQuote.externalDeliverable(this.net, resolved.info(), Long.MAX_VALUE);
             if (amount <= 0L) {
                 return ItemStack.EMPTY;
             }

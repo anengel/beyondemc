@@ -178,6 +178,12 @@ public final class InterfaceWithdrawService {
         // 有真实库存 → 原生抽取（需求 R6 的同一原则）。
         // 物化路径不能走这条：放行等于把 EmcItemKey 交给 super.extract 零扣费取走。
         if (!materialized && storage.hasStack(itemKey)) {
+            // 触发点 ⑥（0.3.2）：真实库存被取走 ⇒ 该物品的物化条目可能要"补回来"。
+            // 为什么必须有这一处：MaterializeMath.solve 对"当前有真实库存"的物品**跳过**物化
+            // （避免与 BD 原生行重复），而真实库存的减少**不改变 EMC**，所以原来没有任何触发点。
+            // 实测后果（2026-10-01 存档）：火药被网络接口铸造出来后又被取走，物化条目永久缺失，
+            // 蓝图大炮随即对火药报"无库存"。scheduleRefresh 排到 tick 之后执行，此处只入队、不重算。
+            ItemMaterializer.scheduleRefresh(net);
             return pass(tryExtract);
         }
 
@@ -207,6 +213,7 @@ public final class InterfaceWithdrawService {
         }
         // 有真实库存 → 交给原生抽取（需求 R6 的同一原则）；物化路径同样不能放行
         if (!materialized && storage.hasStack(canonicalKey)) {
+            ItemMaterializer.scheduleRefresh(net); // 触发点 ⑥：真实库存被取走 ⇒ 条目可能要补回来（见上）
             return pass(tryExtract);
         }
 
@@ -223,9 +230,11 @@ public final class InterfaceWithdrawService {
             return deny(materialized, tryExtract);
         }
         long unitPrice = policy.unitPrice();
-        // 真实库存路径不带物化量约束（Long.MAX_VALUE = 不设上限），
-        // 于是这里的结果恰好等于原先的 min(tryExtract.amount(), affordable)。
-        long want = policy.deliverable(tryExtract.amount(), Long.MAX_VALUE);
+        // 唯一算式（MaterializeQuote.exposedAmount）：只受余额约束，**与物化条目无关**。
+        // 本路径的真实交付是"扣 EMC + 当场铸造"，条目只是派生数据、允许缺失；
+        // 第三方暴露路径（Create 蓝图接口 / 通用物品能力桥）也必须用这同一个入口，
+        // 否则两条路会分叉 —— 那正是 0.3.2 实测缺陷（大炮对已学习的火药报"无库存"）。
+        long want = MaterializeQuote.exposedAmount(tryExtract.amount(), policy.affordable(), true);
         if (want <= 0L) {
             // 买不起：拒绝这次抽取（不要交半份），接口本周期就输出不了东西
             logThrottled("网络 {} 余额 {} 不足以兑换 {}（单价 {}），本次抽取被拒绝",
