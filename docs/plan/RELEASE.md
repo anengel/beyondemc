@@ -195,12 +195,17 @@ OK   Mixin 目标存活性：核对了 6 个目标，全部存在（4 个客户�
       **tag 从未推送，重打无副作用**）
 - [ ] **本地 tag `v0.3.2` 尚未 push** —— 推送由使用者执行：
       ```bash
-      git push origin main          # 远端 main 停在 38bcfb7，本地领先 4 个提交
-      git push origin v0.3.2        # 远端已有 v0.1.0~v0.3.1，只缺 v0.3.2
+      git push origin main          # 把本地开发主线推到远端
+      git push origin v0.3.2        # 只推 v0.3.2
       ```
       （不要用 `git push origin --tags`：它会顺带尝试推 `v0.3.0` / `v0.3.1`，而这两个已发布的
       tag 树内同样缺各自的 `docs/release-notes-v0.3.x.md`。它们已推送、不能在不 force push
       的前提下修正，保持原样即可；只推 `v0.3.2` 可避免任何歧义。）
+      **推送前先现场核对落后多少**（数字随本地提交变动，故此处不写死）：
+      ```bash
+      git rev-list --count origin/main..HEAD    # 本地领先几个提交
+      git ls-remote --tags origin               # 远端已有哪些 tag
+      ```
 - [ ] GitHub Release：选 tag `v0.3.2`，正文粘 `docs/release-notes-v0.3.2.md`，
       附件传 `backups/beyondemc-1.21.1-neoforge-0.3.2.jar`
 
