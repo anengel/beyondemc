@@ -171,7 +171,9 @@ OK   Mixin 目标存活性：核对了 6 个目标，全部存在（4 个客户�
 - [x] `logoFile` —— ✅ 已配 `beyondemc.png`（256×256，工程根 `src/main/resources/`）。
       这是**占位图标**，可随时替换：换成你自己的图片、保持文件名与 256×256 即可
 - [x] 确认 `libs/` 下的前置模组 jar **没有**被打进产物（`jarJar` 未启用，已核实）
-- [x] 升级安装路径不会留下旧 jar —— `tools/install-to-mods.ps1` 第 5 步会先清 `beyondemc-*.jar`
+- [x] 升级安装路径不会留下旧 jar —— `tools/install-to-mods.ps1` 在复制前会清掉同 `modId` 的
+      已存在 jar（按 `modId` 判、不只看文件名，因此整合包那份加了中文前缀的异名 jar 也能识别），
+      并拒绝在结果目录里留下同一 `modId` 的两份。回归测试：`tools/test-install-to-mods.ps1`
 
 ### 3.2 构建
 

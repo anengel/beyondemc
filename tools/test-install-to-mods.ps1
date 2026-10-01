@@ -3,8 +3,14 @@
 
  为什么需要它：install-to-mods.ps1 曾经有一版会**谎报成功** —— 它打印
  "三件套齐全且无重复"，实际上却把整合包里那份改了名的同名模组留在原地，
- 结果是两份同 modId 的 jar 共存，NeoForge 会以 "Duplicate mod" 拒绝启动。
- 这类"静默谎报"必须由测试来兜，靠肉眼看输出看不出来。
+ 结果是两份同 modId 的 jar 共存，而它自己没发现。这类"静默谎报"必须由测试来兜，
+ 靠肉眼看输出看不出来。
+
+ （顺带说明两份同 modId 的实际后果，依据 FML loader 4.0.44 / securejarhandler 3.0.8
+   的源码与字节码：内容相同时模块名也相同，FML 只会按版本挑一份、打一条 INFO，
+   **不会**拒绝启动；真正的 `fml.modloadingissue.duplicate_mod` 报错要"两个不同模块
+   声明同一 modId"才触发。所以这里的断言针对的是"不该留下多余副本"——留下同名不同
+   版本的副本时，被挑中的是版本号大的那个，文件名却完全不同，玩家看不出加载了哪份。）
 
  它复现的关键情形：
    1. 整合包风格的中文前缀文件名（[测试前缀] ProjectE-...jar）—— 靠 modId
@@ -117,7 +123,7 @@ foreach ($id in $OUR_IDS) {
     } elseif ($n -eq 0) {
         Bad "[FAIL] $id 一份都没有"; $fail++
     } else {
-        Bad "[FAIL] $id 有 $n 份，会触发 Duplicate mod：$($byId[$id] -join ' + ')"; $fail++
+        Bad "[FAIL] $id 有 $n 份（不该留下多余副本）：$($byId[$id] -join ' + ')"; $fail++
     }
 }
 

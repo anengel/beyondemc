@@ -275,15 +275,27 @@ if (Test-Path -LiteralPath $target) {
     }
 }
 
-# ⚠️ 按 modId 去重，而不是按文件名。
+# 按 modId 去重，而不是按文件名。
 #
 # 整合包实例常给 jar 加中文名前缀，例如：
 #     文件名 [等价交换重制版] ProjectE-1.21.1-PE1.1.0.jar
 #     modId  projecte
 # 名字和上游的 projecte-1.21.1-1.1.0.jar 完全不同，但两者内容一模一样
-# （实测 SHA-256 相同），提供了**同一个 modId**。若只按文件名判重，就会把两份
-# 都留在 mods 里，NeoForge 直接以 "Duplicate mod" 拒绝启动；而报错信息里
-# 完全不会提"文件名不同"这件事，非常难查。
+# （实测 SHA-256 相同），提供了**同一个 modId**。只按文件名判重就会把两份都留下。
+#
+# 留下两份的实际后果（依据 FML loader 4.0.44 与 securejarhandler 3.0.8 的源码/字节码，
+# **不是**实机启动验证）：
+#   * 两份内容相同时，jar 里的 `Automatic-Module-Name` 也相同 ⇒ 模块名相同。FML 的
+#     `UniqueModListBuilder.selectNewestModInfo` 对"同一模块名的多个文件"只做一件事：
+#     按版本降序排序、取第一个，并打一条 INFO「Found N mod files for modid X,
+#     selecting ... as it is the most recent based on version data」。**不报错、能启动**。
+#   * 只有"两个**不同模块**各自声明了同一个 modId"时，FML 才抛
+#     `ModLoadingException`（issue 键 `fml.modloadingissue.duplicate_mod`，
+#     日志 `Found duplicate mods:`）并拒绝启动。
+# 所以对**同内容**的异名 jar，危害是"静默丢弃一份 + 日志里多一行"，不是开不了游戏。
+# 但两种情形都不该留：同名不同版本时，被挑中的是版本号大的那个，而文件名完全不同，
+# 玩家根本看不出实际加载的是哪一份。构建这个脚本的目的是"装成你想要的样子"，
+# 留一份来路不明的副本就失去了这个保证。
 $toRemove = @()          # @( @{ Name=...; Why=... } )
 foreach ($f in $srcs) {
     $ids = $srcIds[$f.FullName]
@@ -368,7 +380,7 @@ foreach ($n in $OUR_IDS) {
 }
 Info ""
 if ($dupes.Count -gt 0) {
-    Bad "发现重复 modId —— 游戏会以 Duplicate mod 拒绝启动："
+    Bad "发现重复 modId —— 若两份来自不同模块，FML 会以 fml.modloadingissue.duplicate_mod 拒绝启动："
     foreach ($d in $dupes) { Bad ("   {0}" -f $d) }
     exit 1
 } elseif ($missing.Count -eq 0) {

@@ -30,8 +30,19 @@
 **本模组不包含上述模组**，请自行下载后与本 jar 放进同一个 `mods/` 目录。
 只放本模组会导致游戏拒绝加载并提示缺少依赖。
 
-> 升级时请**先删掉旧的 `beyondemc-*.jar`** 再放新 jar —— 同一个 `modId` 出现两个 jar 会让游戏报
-> "version differences that were not resolved"。仓库里的 `tools/install-to-mods.cmd` 会自动清旧版。
+> **升级步骤**：删掉旧的 `beyondemc-*.jar`，放进新 jar（两个前置模组不用换）。
+> `mods/` 里不该留下同一个 `modId` 的两份 —— 仓库里的 `tools/install-to-mods.cmd`
+> 会自动清旧版，而且是**按 `modId`** 判、不只看文件名：有些整合包会给 jar 加中文名前缀，
+> 例如 `[等价交换重制版] ProjectE-1.21.1-PE1.1.0.jar` 与上游的 `projecte-1.21.1-1.1.0.jar`
+> 其实是**同一份内容**（`modId` 都是 `projecte`），只看文件名看不出来。
+> 万一真留了两份同内容的 jar，FML 会按版本挑一份、打一条 INFO，**不会**拒绝启动；
+> 但同名不同版本时，被挑中的是版本号大的那份、文件名却完全不同，容易看不出实际加载了哪一份。
+>
+> 换版本后首次读旧存档时可能出现 `The following mods have version differences that were not resolved:`
+> 与 `Things may not work well.` —— 那是 NeoForge 在比对**存档里记录的模组清单**，换版本必然出现，
+> 与 `mods/` 里有几份 jar 无关。实测往返见 `docs/testing/phase8-materialize-report.md`：
+> 把 0.3.1 的存档交给 0.2.0 读（14 条物化条目被优雅丢弃、EMC 与学习集无损），再由 0.3.1 读回，
+> **0 条解码错误**。
 
 ---
 

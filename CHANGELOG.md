@@ -2,6 +2,47 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的结构。
 
+## [未发布]
+
+对应 tag `v0.3.1` 之后的提交（`2e5b8e3` 起）。**只碰 `tools/` 与 `.gitignore`，`src/` 零改动**，
+因此发布 jar `beyondemc-1.21.1-neoforge-0.3.1.jar` 与其 SHA-256 均不变，可放心继续使用。
+
+### 修正
+
+- **`tools/install-to-mods.ps1` 会把改了名的同一个模组装成两份。**
+  整合包实例会给 jar 加中文名前缀，例如 `[等价交换重制版] ProjectE-1.21.1-PE1.1.0.jar`
+  与 `[超越维度] beyonddimensions-1.21.1-neoforge-0.7.30.jar`。它们与上游
+  `projecte-1.21.1-1.1.0.jar`、`beyonddimensions-1.21.1-0.7.30.jar` **内容完全相同
+  （SHA-256 一致）**，只是文件名不同，提供的 `modId` 都是 `projecte` / `beyonddimensions`。
+  原逻辑只按文件名删旧的 `beyondemc-*.jar`，于是会把上游那份也拷进去。
+  现改为**按 `modId` 去重**：读取每个 jar 的 `META-INF/neoforge.mods.toml`，只取
+  `[[mods]]` 段的 `modId`（不取 `[[dependencies.*]]` 里的，否则 `projectexpansion`
+  声明的 `projecte` 依赖会被误判为重复）；并显式检测"同一 `modId` 出现 2 份"并以非 0 退出码报错。
+  *后果说明（已按 FML 源码核实，非实机启动验证）*：内容相同的两份 jar，其
+  `Automatic-Module-Name` 也相同，FML 的 `UniqueModListBuilder.selectNewestModInfo`
+  只会**按版本挑一份并打一条 INFO**，不会拒绝启动；真正的
+  `fml.modloadingissue.duplicate_mod` 报错要"两个**不同模块**声明同一 `modId`"才触发。
+  但留副本仍应避免：同名不同版本时被挑中的是版本号大的那份，而文件名完全不同，
+  玩家看不出实际加载了哪一份。
+- **`tools/install-to-mods.ps1` 的候选探测会漏掉真正的目标实例。**
+  原逻辑只认版本目录名同时含 `1.21.1` 与 `NeoForge`，而整合包实例常改名
+  （如 `你好，新蒸程！V1.7.5正式版`）→ 匹配不到 → 因"只找到 1 个候选"而**静默装进另一个空实例**。
+  现改为"名字匹配 **或** 该 `mods` 目录内已有本模组/前置"取并集，并列出命中的 `modId` 与文件名。
+- **修 `-LiteralPath`**：`Test-Path` 默认把文件名里的 `[` `]` 当通配符字符类，对
+  `[等价交换重制版] ProjectE-…jar` 会返回"不存在"，导致 `modId` 读不到 —— 既不去重、
+  结果核对也漏看，最后**谎报"无重复"**。这是本组改动里唯一真正会导致误判的缺陷。
+- **修 `-ListOnly` 的隐性越权**：原写法在"恰好 1 个候选"时不会退出，而是继续往下
+  走到复制那一步；`-ListOnly -ModsPath` 组合也会被忽略。现对任何候选数量都只报不改。
+
+### 新增
+
+- `tools/install-to-mods.ps1 -ListOnly`：只列出候选 `mods` 目录、不改任何文件
+  （含 `-ListOnly -ModsPath` 组合）。
+- `tools/test-install-to-mods.ps1`：安装器冒烟测试。在仓库内的临时沙盒里复现
+  "中文前缀异名前置 + 旧版本本模组"的场景，断言安装后每个 `modId` 恰好 1 份，
+  全程不碰真实游戏实例。把上述"静默谎报成功"固化成可复跑的回归测试。
+- `tools/jarids.py`：离线查看任意 jar 的真实 `modId`，便于交叉核对。
+
 ## [0.3.1] - 2026-10-01
 
 Minecraft 1.21.1 · NeoForge 21.1.249+ · 需要 Beyond Dimensions 0.7.30+ 与 ProjectE 1.1.0+ · JEI 19+ 可选。
