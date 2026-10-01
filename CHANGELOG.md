@@ -136,6 +136,45 @@
 > 证据 `run/verify-032-canon.log`。`reload` 只能靠 RCON 送达（Gradle 的 `runServer` 不转发 stdin），
 > 工具与流程见 `docs/plan/CREATE-INTEGRATION.md` §11.5。
 
+### 修复 —— 蓝图大炮「圆石满足、传动杆不满足」（上一条修复后的实测对照回归）
+
+> 使用者第二轮实测反馈：同一份网络里**圆石被识别、传动杆不被识别**。两者都已学习、
+> 都有价、物化条目与余额都充足 —— 权威数据完全对称，说明分叉不在报量判据，
+> 而在**数量口径**。完整取证记录见 `docs/plan/CREATE-INTEGRATION.md` **§11.7**。
+
+- **根因（显示量按原版堆叠数 64 夹取）**：Create 的 `updateChecklist` 用
+  `getStackInSlot(i).getCount()` 累加 `gathered`，材料清单按 `required − gathered` 分
+  "满足/还缺"；而 BD 的蓝图接口**每个物品只有一个槽**（`stacksSnapshot` 按物品去重）。
+  上一版的 `displayStack` 把显示栈夹到 `maxStackSize`（64）⇒ `gathered` 封顶 64
+  ⇒ **任何需求量超过一组的材料永远显示"还缺"**。
+- **存档实证（2026-10-01，无头复现）**：蓝图 `Iron & Andesite Alloy All-in-One Producer`
+  里 `required[create:shaft] = 125`（2 根明杆 + 123 根「带壳传动链驱动 / 带壳传动杆」的
+  组装需求 —— Create 对这些方块的 `ItemRequirement` 会额外要传动杆），
+  `required[minecraft:cobblestone] = 58`。修复前：`shaft gathered=64/125 → 还缺 61`、
+  `cobblestone 64/58 → 满足` —— 与实测报告逐字吻合。
+- **修复：显示量与 BD 原生语义对齐 —— 返回全量。** BD 两处 `getStackInSlot`
+  （蓝图接口的 `copyStackWithCount(ka.amount())`、通用物品桥的
+  `clampLongToInt(...)`）对真实库存都返回**全量**、从不夹 64；
+  `displayStack` 改为只按 int 范围夹取。`extractItem` 语义本来就是
+  "最多给 count 个"，不受影响（Create 每次只请求 1 个或一组以内）。
+- **新增诊断命令 `/beyondemc cannon <x> <y> <z>`（控制台可用）**：
+  "部分材料不满足"的判定链散在 Create（required/gathered/门槛）、BD（槽位快照、
+  精确键查询）、本模组（两条补报 mixin）**三个模组**里，实机上各种失败长得一模一样。
+  该命令反射调用大炮的生产路径 `updateChecklist()`，逐项打印 required/gathered
+  （即打印清单的"满足/还缺"口径）与蓝图接口每个槽位的
+  `getStackInSlot` / `extractItem(1,true)` 两条判据（Create 类只 `runtimeOnly`，
+  故全走反射；Create 缺席时给一行说明并退出）。
+- **自检断言更正**：`displayStackClamping` 原断言 `1,000,000 → 64`，把缺陷钉成了
+  期望行为（与上一条 `deliverable(64,0)==0` 同型错误）。现改为断言
+  `1,000,000 → 1,000,000`、超 int → `Integer.MAX_VALUE`、`0/负数 → 空栈`。
+
+> **本回归的端到端验证（无头，同一份真实存档）**：修复前 `beyondemc cannon 17 -60 1`
+> 输出 `清单·还缺：create:shaft 还缺 61（gathered=64 / required=125）`、
+> `满足条件（1 种）：minecraft:cobblestone(64/58)`；修复后同一命令输出
+> **`满足条件（2 种）：create:shaft(139367/125)，minecraft:cobblestone(3066095/58)`**，
+> 且槽 1 的 `getStackInSlot=create:shaft×139367`（全量）。自检 **0 FAIL**。
+> 证据 `run/verify-032-cannon-before.log` / `run/verify-032-cannon-after.log`。
+
 ### 修正 —— 工具（只碰 `tools/`）
 
 - **`tools/install-to-mods.ps1` 会把改了名的同一个模组装成两份。**

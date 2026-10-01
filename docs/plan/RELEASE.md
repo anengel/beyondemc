@@ -125,6 +125,7 @@ OK   Mixin 目标存活性：核对了 6 个目标，全部存在（4 个客户�
 | 网络接口（配了过滤器） | 能抽走物化物品并扣 EMC；**模拟抽取完全不扣费** | ✅ 收费侧同上；模拟抽取由自检覆盖 |
 | **Create 蓝图接口取料**（0.3.2 新增） | 大炮能识别并取用网络里的物化物品；取用时**扣 EMC** | ✅ 2026-10-01 实机：`Create Mixin 已应用到 …NetedSchematicannonItemHandler`；`接口兑换：minecraft:gunpowder ×1 → 扣除 192 EMC（单价 192）`（该火药当时无真实库存 ⇒ 只能来自物化路径） |
 | **大炮清单"部分材料显示无库存"回归**（0.3.2 发布后修复） | 已学习 + 买得起 + 策略放行的材料，**一律**要在大炮清单里显示满足条件，与"物化条目是否存在"无关 | ✅ 无头端到端（`run/verify-032-canon.log`）：真实存档（15 项已学习 / 仅 14 条物化条目）重算后 → `物化（第 1 次）：网络 0 EMC=3066234 → 15 条物化条目`，存档 `emc_item` **14 → 15**（补齐 `minecraft:gunpowder 15969`），自检 **0 FAIL** |
+| **需求 > 一组（64）的材料永远"还缺"回归**（0.3.2 发布后修复 · 第二轮） | 网络对大炮报的**数量是全量**（与 BD 原生 `clampLongToInt` 同口径），**不按堆叠数 64 截断** ⇒ 需求超过一组的材料同样判定满足（实证蓝图 `required[create:shaft]=125`，来源见 `CREATE-INTEGRATION.md` §11.8） | ✅ 无头端到端（`run/verify-032-cannon-{before,after}.log`）：修复前 `create:shaft 还缺 61（gathered=64 / required=125）` 而圆石 `64/58` 满足（与用户实测逐字吻合）；修复后同存档 `create:shaft 139367/125`、`minecraft:cobblestone 3066095/58` **全部满足**，自检 **0 FAIL**（含新断言"展示栈数量约定"） |
 | **Create 门控**（0.3.2 新增） | 装 Create 时正常注入；不装时整体跳过且**不报错** | ✅ 装：`create 在类路径上=true` 且已应用、无 `MixinApplyError`；无头（不装）：`false` 且不应用、不报错 |
 | 第三方物流管道（AE2/RS 等） | 0.3.2 起**有意暴露**物化条目（无序物品能力桥在原生可视槽之后追加只读物化区）⇒ 应能抽走物化物品并扣 EMC | 🟡 暴露层已由自检（6 项）+ 存档条目双线验证；**具体 AE2/RS 模组上未实跑** |
 | `materializeItems=false` | 物化条目被**清空**，行为回到 0.2（客户端虚拟条目兜底），不出现两行 | ⬜ 存储侧清空语义已由自检覆盖，未做端到端切换 |
@@ -222,6 +223,15 @@ python tools/netaudit.py run/world/data/BDNet_<id>.dat
   - 无头自检 **55 项通过 + 4 跳过，0 FAIL**（`run/verify-032-canon.log`）；
   - 端到端回归（同一份真实存档）：`emc_item` 条目 **14 → 15**（补齐 `minecraft:gunpowder`）；
   - ⚠️ 因此 **`v0.3.2` 的 jar 必须重建、tag 必须重打**（tag 尚未推送，重打零成本）。
+- [x] **0.3.2 发布后修复（第二轮）：需求 > 一组（64）的材料永远"还缺"**（见 §2.2c 新增行与
+      `CREATE-INTEGRATION.md` §11.8；根因是 `MaterializeQuote.displayStack` 误把展示量
+      按堆叠数 64 截断 ⇒ Create 清单的 `gathered` 会计被封顶）
+  - 修法：展示量只按 int 范围截断，与 BD 原生 `clampLongToInt` 同语义；
+  - 新增诊断命令 `/beyondemc cannon <x> <y> <z>`（控制台可用，走生产路径
+        `SchematicannonBlockEntity.updateChecklist`，设计见 `CREATE-INTEGRATION.md` §11.9）；
+  - 无头端到端（同一份真实存档，前后对照 `run/verify-032-cannon-{before,after}.log`）：
+        修复前 `create:shaft 还缺 61（64/125）` → 修复后 `139367/125` 满足，自检 **0 FAIL**；
+  - ⚠️ 因此 **jar 第三次重建（203,550 字节）、tag 再次重打**（tag 仍未推送，零成本）。
 - [ ] 第 2 节其余人工项（§2.1 边界物品、§2.2 多人、§2.3 模组共存、§2.4 性能）
 - [x] `docs/VERSIONS.md` 已更新依赖基线（新增 Create `6.0.10` 可选依赖行；两个必需前置模组**没有**变）
 - [ ] `neoforge.mods.toml` 的以下字段**待填**（目前是注释状态）：
@@ -235,19 +245,26 @@ python tools/netaudit.py run/world/data/BDNet_<id>.dat
 - [x] 升级安装路径不会留下旧 jar —— `tools/install-to-mods.ps1` 在复制前会清掉同 `modId` 的
       已存在 jar（按 `modId` 判、不只看文件名，因此整合包那份加了中文前缀的异名 jar 也能识别），
       并拒绝在结果目录里留下同一 `modId` 的两份。回归测试：`tools/test-install-to-mods.ps1`
-- [x] **备份已随修复重建并重新演练**（2026-10-01 第二轮）：`backups/beyondemc-0.3.2.{bundle,source.zip,jar}`
-  = 681,862 / 644,354 / **195,489** 字节；真克隆核验 **5 个 tag 全部 peel 正确**（`v0.3.2` → `a35b757`）、
-  **117 跟踪文件**、工作树干净；`source.zip` 152 项且**未混入**本机私有手册。
-  ⚠️ 第一轮（`8e07756`）那份**已作废**（jar `8D65DA2B…` 不含本轮修复），**不要**用它发 Release。
-- [x] **`v0.3.2` 已重打到含本轮修复的发布准备提交 `a35b757`**（历次落点：`0d79f9d`
-      "打早了" → `8e07756` → 本轮修复改了 `src/` ⇒ `a35b757`；**tag 从未推送，重打无副作用**）。
-      已在克隆内核对：tag 树内 `CHANGELOG.md` 首标题 = `## [0.3.2]`，且
-      `docs/release-notes-v0.3.2.md` 存在。
+- [x] **备份已随本轮修复第三次重建**（2026-10-01 第三轮）：`backups/beyondemc-1.21.1-neoforge-0.3.2.jar`
+  = **203,550 字节**，sha256 `d2f405804e27f170db560116ad998a5a9dea88ac240a9f59088859414a785071`；
+  `beyondemc-0.3.2.bundle` 与 `beyondemc-0.3.2-source.zip` 同步重建。
+  **尺寸 / sha256 / 克隆演练记录见 `backups/README.md`**（不进 git，始终为最新一轮，
+  避免写死在这里变陈旧 —— 第二轮就发生过一次）。
+  ⚠️ 第一轮（`8e07756`）与第二轮（`4b6d0d4`）的 jar 均已作废（分别 176K+ / 195,489 字节，
+  不含对应轮次的修复），**不要**用它们发 Release。
+- [x] **`v0.3.2` 已重打到本轮的发布准备提交（docs 提交）**（历次落点：`0d79f9d`
+      "打早了" → `8e07756` → `4b6d0d4`（第二轮修复）→ 本轮修复又改了 `src/` ⇒ 第三次重打；
+      **tag 从未推送，重打无副作用**）。发布前现场核对（落点随提交变动，不写死）：
+      ```bash
+      git rev-parse v0.3.2                 # 应指向本轮 docs 提交（= 重打时的最新提交）
+      git show v0.3.2:CHANGELOG.md | head -3   # 首标题应为 ## [0.3.2]
+      git show v0.3.2:docs/release-notes-v0.3.2.md >/dev/null && echo ok
+      ```
 - [x] ~~**`v0.3.2` 已重新指向发布准备提交**~~（**已被上一条取代**。此处保留原因记录：原指向 `0d79f9d` 是**打早了** —— 该提交的
       `CHANGELOG.md` 还写着 `## [未发布]`，树内也没有 `docs/release-notes-v0.3.2.md`。
       `v0.3.1` 及更早的 tag 树内 CHANGELOG 首标题都是**自己的版本号**，即以「发布准备完成后」
-      为 tag 落点；0.3.2 首次违反。已 `git tag -d` 后按原注释重打至 `8e07756`，
-      但随后本轮修复又改了 `src/`，故**仍需再次重打**。）
+      为 tag 落点；0.3.2 首次违反。已 `git tag -d` 后按原注释重打，此后每轮 `src/` 修复
+      都按同一流程再重打。）
 - [ ] **本地 tag `v0.3.2` 尚未 push** —— 推送由使用者执行：
       ```bash
       git push origin main          # 把本地开发主线推到远端

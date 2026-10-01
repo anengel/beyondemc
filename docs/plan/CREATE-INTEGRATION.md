@@ -503,3 +503,57 @@ policy.deliverable(want, materializedAmount)         // 本类只读，绝不写
 
 **结论只由唯一入口给出**，所以命令输出不可能与真实行为分叉；中间几行只解释"为什么"。
 
+
+### 11.8 第二轮实测回归：圆石满足、传动杆不满足（数量口径，非判据）
+
+用户在 0.3.2 修复后再次实测：同一份网络里**圆石被识别、传动杆不被识别**。
+权威数据完全对称（都已学习、都有价、都有物化条目、余额都充足）⇒ 分叉不在报量判据，
+在**数量口径**。
+
+**取证（全部离线完成，一次无头复现收口）**：
+
+1. **离线审计存档**（`tools/netaudit.py`）：18 项已学习 ↔ 18 条物化条目一一对应，
+   `create:shaft` 有 139367 条、`minecraft:cobblestone` 有 3066095 条 —— 排除"条目缺失"。
+2. **反汇编 Create 6.0.10**（`javap`）：`updateChecklist` 的判定门槛与会计口径是两条不同的路：
+   - 门槛：`extractItem(i, 1, true).isEmpty() → continue`（模拟抽取）；
+   - 会计：`checklist.collect(getStackInSlot(i))` —— **累加的是返回堆叠的 `getCount()`**。
+3. **读用户日志**（`run/logs/latest.log`）：`折算：create:shaft ×1 → 22 EMC` 与
+   `折算：minecraft:cobblestone ×1 → 1 EMC` 相继出现，两者路径对称 —— 排除"没学会/没价"。
+4. **解析用户蓝图**（`run/schematics/Iron & Andesite Alloy All-in-One Producer.nbt`）：
+   按方块名统计需求，并扫描方块实体 NBT —— 发现 **60 个 `create:encased_chain_drive`
+   的 BE id 全是 `create:encased_shaft`**（Create 6 改了方块名、保留了旧 BE id），
+   而 Create 对带壳传动类方块的 `ItemRequirement` 会**额外要传动杆**。
+5. **无头复现**（把用户存档铺成 `run/world`，RCON `reload` 后执行新命令
+   `/beyondemc cannon 17 -60 1`）：`required[shaft]=125`、`gathered=64` → 还缺 61；
+   `required[cobblestone]=58`、`gathered=64` → 满足。**与实测报告逐字吻合。**
+
+**根因**：BD 的蓝图接口**每个物品只有一个槽**（`stacksSnapshot` 按物品去重），
+而上一版的 `displayStack` 把显示栈夹到原版堆叠数（64）⇒ `gathered` 封顶 64
+⇒ 任何需求量超过一组的材料**永远显示"还缺"**，无论网络买得起多少。
+
+**修法**：`displayStack` 的数量只按 int 范围夹取、不按堆叠数夹取 —— 与 BD 两处
+`getStackInSlot` 的原生语义对齐（蓝图接口 `copyStackWithAmount(ka.amount())`、
+通用物品桥 `clampLongToInt(...)` 对真实库存都返回全量，从不夹 64）。
+`extractItem` 语义本来就是"最多给 count 个"（Create 每次只请求 1 个或一组以内），不受影响。
+自检 `displayStackClamping` 同步改为断言新口径（`1,000,000 → 1,000,000`）。
+
+### 11.9 诊断命令 `/beyondemc cannon <x> <y> <z>`（控制台可用）
+
+"部分材料不满足"的判定链散在**三个模组**里（Create 的 required/gathered/门槛、
+BD 的槽位快照与精确键查询、本模组的两条补报 mixin），实机上各种失败长得一模一样。
+该命令一次把三层全部打出来：
+
+- 大炮状态（state/status/已放/蓝图加载）；
+- 反射调用**生产路径** `updateChecklist()` 后逐项打印 required / gathered
+  与"满足/还缺"（与打印清单 `createWrittenBook` 同一口径）；
+- 蓝图接口每个槽位的 `getStackInSlot`（判据 A：会计来源）与
+  `extractItem(1, true)`（判据 B：门槛）。
+
+实现要点：Create 在本工程只是 `runtimeOnly`（编译期不可依赖），所以**全走反射**
+（`Class.forName` + `getMethod/getField`）；槽位快照经能力查询
+（`Capabilities.ItemHandler.BLOCK`）+ 反射读 `stacksSnapshot`；Create 缺席时给一行
+说明并退出，不炸命令树。`updateChecklist()` 内部对清单的扫库全是模拟抽取
+（本模组模拟路径只读），故无副作用。
+
+无头用法（配合 §11.5 的 RCON）：`/forceload add <x> <z>`（若大炮不在出生区块）、
+`reload`（EMC 表就绪）、`beyondemc cannon <x> <y> <z>`。

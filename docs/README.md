@@ -131,6 +131,7 @@ docs/
 | **回退到 0.2.0 安全** | 同一存档交给 `v0.2.0` 的代码：`Done (0.346s)` 不崩、EMC 与 14 项学习集无损、14 条物化条目被 BD 逐条 WARN 丢弃 |
 | **0.2 存档直接进 0.3** | 本次试玩的世界本身就是 0.2.0 时期建的（模组加载器会提示 mod 版本变化，属正常） |
 | **0.3.2 发布后修复：大炮"部分材料无库存"** | 同一存档重算：日志 `物化（第 1 次）：网络 0 EMC=3066234 → 15 条物化条目`，`emc_item` **14 → 15**（补齐 `minecraft:gunpowder 15969`），自检 0 FAIL。证据 `run/verify-032-canon.log`；根因与验证见 `plan/CREATE-INTEGRATION.md` §11 |
+| **0.3.2 发布后修复（第二轮）：需求 > 一组（64）的材料永远"还缺"** | 修复前无头复现（同一份真实存档）：`create:shaft 还缺 61（gathered=64 / required=125）`，而圆石 `64/58` 满足 —— 与用户实测逐字吻合；修复后同存档：`create:shaft 139367/125`、`minecraft:cobblestone 3066095/58` **全部满足**，自检 **0 FAIL**。证据 `run/verify-032-cannon-{before,after}.log`；根因（`displayStack` 误按堆叠数截断）与修法见 `plan/CREATE-INTEGRATION.md` §11.8 |
 
 > ⚠️ **表中"14 条"是 2026-10-01 首次实测的数字**：当时网络有 15 项已学习，
 > 而 `minecraft:gunpowder` 恰因"曾有真实库存 → 被取走 → 无触发点重算"而**缺失** ——
