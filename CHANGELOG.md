@@ -31,6 +31,21 @@ Minecraft 1.21.1 · NeoForge 21.1.249+ · 需要 Beyond Dimensions 0.7.30+ 与 P
 - `docs/plan/ROADMAP-0.3.0.md` §9.4b：补「0.3.x 改崩 → 退回 `v0.3.0`」的回退步骤。
 - `docs/plan/RELEASE.md` §1 自检计数更新为 **54 项**（原 50 项）。
 
+### 文档
+
+- **新增 `docs/release-notes-v0.3.1.md`** —— 可直接粘贴到 GitHub Release 的发布说明。
+- **新增 `docs/testing/phase8-materialize-report.md`** —— 物化专项实测报告。含两类不来自自检的证据：
+  ①**直接解析存档**：网络里确实有 14 条 `beyondemc:stack_type/emc_item` 真实条目，
+  EMC `3066234`，其中 8 项满足精确恒等式 `数量 = floor(EMC ÷ 单价)`、另 6 项落在对应价格区间内，
+  且 14 条**各自独立未被合并**（从存储层证伪"塌缩"）；
+  ②**A/B 回退演练**（`git worktree` 检出 `v0.2.0` 读同一份 0.3.1 存档）：
+  0.2.0 `Done` 不崩、EMC 与 14 项学习集无损、14 条物化条目被 BD 逐条 WARN 丢弃；
+  0.3.1 读同一份存档 **0 条解码错误**。
+- `docs/plan/RELEASE.md` §2.2c：把物化专项 14 项逐条标注实测状态（✅ 已实测 / 🟡 部分 / ⬜ 待做），
+  并补上可复用的**回退演练步骤**。
+- 新增 `tools/nbtdump.py`（最小 NBT 解析器，仅标准库）—— 用来离线核对存档里的条目与数量，
+  是"物化口径对不对"最省事的检查手段。
+
 ## [0.3.0] - 2026-10-01
 
 Minecraft 1.21.1 · NeoForge 21.1.249+ · 需要 Beyond Dimensions 0.7.30+ 与 ProjectE 1.1.0+ · JEI 19+ 可选。
