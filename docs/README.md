@@ -25,6 +25,7 @@ docs/
 ├── release-notes-v0.1.0.md      面向用户的发布说明（可直接粘进 GitHub Release）
 ├── release-notes-v0.2.0.md
 ├── release-notes-v0.3.1.md      ★ 0.3.x 的发布说明（0.3.0 为内部里程碑，未公开）
+├── release-notes-v0.3.2.md      ★ 0.3.2 的发布说明（Create 集成与「第三方可见化」）
 ├── plan/
 │   ├── ROADMAP.md               ★ 实施路线图与工作流（阶段、步骤、验收标准、测试策略）
 │   ├── ROADMAP-0.2.0.md         0.2 版本计划（吸附到鼠标、JEI 集成）

@@ -2,10 +2,11 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的结构。
 
-## [未发布]
+## [0.3.2] - 2026-10-01
 
-对应 tag `v0.3.1` 之后的提交（`2e5b8e3` 起）。本节分两部分：
-**0.3.2 的 Create 集成（改了 `src/`）** 与 **更早一轮的工具修复（只碰 `tools/`）**。
+对应 tag `v0.3.2` → `0d79f9d`。本节分两部分：
+**Create 集成与「第三方可见化」（改了 `src/`，已实机验收）** 与 **更早一轮的工具修复（只碰 `tools/`）**。
+面向用户的发布说明见 `docs/release-notes-v0.3.2.md`；设计取舍见 `docs/plan/CREATE-INTEGRATION.md`。
 
 ### 新增 —— Create（机械动力）集成与「第三方可见化」（0.3.2，`src/` 有改动）
 
@@ -54,6 +55,8 @@
 > （AE2 导入总线、漏斗等）会主动把网络 EMC 换成物品，而这些物品再存回网络时按**回收价**
 > 折算（≤ 买入价）⇒ 会造成**静默的 EMC 净损失**。这是"让物化物品真实可用"的必然代价，
 > 已与使用者确认接受。观测方法：看 `[BeyondEMC] 接口兑换：` 日志频率与 EMC 余额曲线。
+> 实测环境里火药与钻石的**买入价 = 回收价**（火药 192/192），价差为 0，来回不掉 EMC；
+> 有价差的物品以各自环境价格为准。
 > **成因、量级、观测与潜在处置**的完整分析见 `docs/plan/CREATE-INTEGRATION.md` §5。
 
 > **本轮验证（截至本条目）**：
@@ -68,8 +71,21 @@
 >   全部存在；`ItemUnifiedStorageHandler` 的 `private final UnifiedStorage storage` 精确匹配；
 >   Create 侧 `SchematicannonBlockEntity#grabItemsFromAttachedInventories`、
 >   `MovementBehaviour#REGISTRY` 均在。
-> - ⏳ **待人工验收（需 GUI 客户端）**：蓝图大炮实机开工取料与扣费、
->   通用桥抽物化物品、模拟不扣费、jarJar 生效 —— 清单见 `docs/plan/CREATE-INTEGRATION.md` §8.2。
+
+> **实机验收（2026-10-01，真实客户端 + Create 6.0.10 + 真实 EMC 表）—— 已通过**：
+> - 门控与注入：`Create Mixin 门控判定：create 在类路径上=true`；
+>   `Create Mixin 已应用到 …NetedSchematicannonItemHandler` ⇒ **Mixin 在真实环境成功注入**，
+>   全程**无 `MixinApplyError` / 无注入失败**（`run/logs/latest.log:29,740`）。
+> - 蓝图接口取料**确实走收费链**：`接口兑换：minecraft:gunpowder ×1 → 扣除 192 EMC（单价 192）`
+>   （`run/logs/latest.log:1115`；该火药当时无真实库存，故只能来自物化路径）。
+> - 存档层面双线并存：`BDNet_0.dat` 有 **14 条** `beyondemc:stack_type/emc_item`（数量互不相同）
+>   与 `beyonddimensions:stack_type/item` 的**真实库存**（样本：装 8 把附魔合金斧的潜影盒）——
+>   分桶共存、不塌缩、不互相顶替。
+> - 全程日志**无本模组相关异常**（剩余 ERROR 均为 BD 自身贴图/方块状态告警与离线 SSL 告警）。
+> - 仍未覆盖：多人并发、在 AE2/RS 等具体物流模组上的取用实跑、10 万件量级性能。
+
+> **发布产物**：`beyondemc-1.21.1-neoforge-0.3.2.jar`（190,995 字节）；
+> 备份 `backups/beyondemc-0.3.2.{bundle,source.zip,jar}`；真克隆演练通过（28 提交、5 tag、114 跟踪文件）。
 
 ### 修正 —— 工具（只碰 `tools/`）
 
