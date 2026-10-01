@@ -23,6 +23,9 @@
   它的"有序版兄弟" `ItemStackTypedHandler` **刻意不动** —— 理由见 §3。
 - **已知风险**：自动化装置（抽取→回插回路）会**静默折价损失 EMC**（买入价 vs 卖出价的价差），
   成因 / 量级 / 观测方法见 §5。这是把物化物品交给自动化的**必然代价**，已由用户明确接受。
+- **⚠️ 发布后实测缺陷（已修，见 §11）**：第一版暴露路径**额外要求「物化条目存在」**才报量，
+  于是"条目暂时缺失"的材料在大炮清单里显示「无库存」，而其实一取就能取到。
+  判据必须**只看余额**（与真实扣费同源），**绝不看派生数据**。
 
 ---
 
@@ -260,15 +263,22 @@ policy.deliverable(want, materializedAmount)         // 本类只读，绝不写
 
 ### 8.1 自动自检（每次启动 / `/beyondemc selftest`）
 
-`diag/CreatePathwaySelfTest.java`，5 组**纯函数**断言（无需开游戏、无需 EMC 表就绪）：
+`diag/CreatePathwaySelfTest.java`，6 组**纯函数**断言（无需开游戏、无需 EMC 表就绪）：
 
 | 组 | 断言 |
 |---|---|
 | `bucketSeparation` | `EmcItemKey.ID != ItemStackKey.ID`（两者若相同会塌缩合并，是比"看不见"更严重的**数据事故**） |
-| `deliverableBoundaries` | 不要=0 / 无条目=0 / 取需求 / 受物化量限 / 受余额限 / 负数=0 / 可负担 0 时不交半份 |
+| `exposedAmountInvariant` | **70 组**（需求 × 余额 × 策略）满足「报得出量 ⟺ 策略放行 ∧ 有需求 ∧ 余额买得起」。算式里**没有**"物化条目"这一项 ⇒ 条目缺失/偏少都不可能把量压成 0（§11 实测缺陷的回归） |
+| `deliverableBoundaries` | 不要=0 / 取需求 / 受余额限 / 买不起=0 / 负数=0 / `MAX` 不溢出 |
 | `deliverableMatchesChargeFormula` | 4 单价 × 4 余额 × 4 需求量 = 64 组，报价与收费段 `min(请求量, 余额/单价)` **逐组相同** |
 | `displayStackClamping` | `1,000,000 → 64`（原版堆叠数）；`1 → 1`；`0`/负数 → 空栈 |
 | `nullSafety` | `net=null` / `info=null` 时报价为 `null`（不可交付），物化量报 0 |
+
+> **一组旧断言被删掉了（重要）**：原 `deliverableBoundaries` 里有一条
+> `rich.deliverable(64, 0) == 0`（"没有物化条目 → 报 0"），它把 §11 的缺陷**钉成了期望行为**，
+> 所以自检全绿却掩盖着真实 bug。现由 `exposedAmountInvariant` 取代，断言方向正好相反。
+> **教训**：自检必须断言**不变式**（"什么条件下必须报得出量"），而不是**当前实现**的取值。
+
 
 > 依赖真实 EMC 价格（`IEMCProxy.getValue`）与配置开关的路径**无法在无头环境断言**，
 > 故记入下面的**人工验收清单**。
@@ -284,7 +294,13 @@ policy.deliverable(want, materializedAmount)         // 本类只读，绝不写
 - [x] **B. 大炮开工扣费** —— `[BeyondEMC] 接口兑换：minecraft:gunpowder ×1 → 扣除 192 EMC（单价 192）`（`:1115`）。
       该火药刚被折算成 EMC（`:1114`，回收单价 192），**网络里没有它的真实库存** ⇒ 交付只能来自物化路径。
 - [ ] **C. 通用桥在真实第三方管道上抽物化物品** —— ⬜ 未在 AE2 / RS 上实跑。
-      暴露层本身已由自检（6 项）与存档双线验证（`emc_item` 桶 14 条与真实库存分桶共存）。
+      暴露层本身已由自检（6 项）与存档双线验证（`emc_item` 桶 15 条与真实库存分桶共存）。
+- [x] **H. §11 回归的端到端验证（无头，2026-10-01）** —— 把用户那份"15 项已学习 / 仅 14 条物化条目"
+      的真实存档铺成 `run/world`，在专用服务器上 `/reload` 触发一次重算：
+      日志唯一一条 `物化（第 1 次）：网络 0 EMC=3066234 → 15 条物化条目`，
+      存档内 `emc_item` 由 **14 → 15**（补齐 `minecraft:gunpowder 15969`），EMC 池 3066234 与
+      15 项学习集无损。证据：`run/verify-032-canon.log`（0 FAIL）。
+      方法与"为什么必须走 RCON"见 §11.5。
 - [~] **D. 模拟不扣费** —— 🟡 已由自检断言（`CreatePathwaySelfTest` 的算式一致性与报价边界）；
       实机未单独构造"反复模拟抽取"的观测。
 - [x] **E. jarJar 生效** —— 客户端带 Create 正常启动，日志**无**缺 flywheel / ponder 的报错
@@ -331,11 +347,24 @@ policy.deliverable(want, materializedAmount)         // 本类只读，绝不写
 - `mixin/ItemUnifiedStorageHandlerMixin.java` —— 通用桥暴露（§2.2）
 - `mixin/BeyondEmcCreateMixinPlugin.java` —— Create 门控（§7）
 - `resources/beyondemc.create.mixins.json` —— create 专用 Mixin 配置
-- `diag/CreatePathwaySelfTest.java` —— 5 组纯逻辑断言（§8.1）
+- `diag/CreatePathwaySelfTest.java` —— 6 组纯逻辑断言（§8.1）
 - `docs/plan/CREATE-INTEGRATION.md` —— 本文
+- `tools/netaudit.py` —— 离线审计 BD 网络存档（EMC 池 / 按桶分组的存储条目 / 学习集合）
+- `tools/rcon.py` —— 极简 RCON 客户端，供无头验证在专用服务器上发控制台指令（§11.5）
 
 **修改**
-- `exchange/InterfaceWithdrawService.java` —— 定价/余额段改为调用 `MaterializeQuote.policy(...)`
+- `exchange/InterfaceWithdrawService.java` —— 定价/余额段改为调用 `MaterializeQuote.policy(...)`；
+  算式改用 `MaterializeQuote.exposedAmount(...)`；真实库存被取走的分支补 `scheduleRefresh`（§11.3 触发点 ⑥）
+- `materialize/MaterializeQuote.java` —— 新增纯函数 `exposedAmount(...)` 与对外唯一入口
+  `externalDeliverable(...)`；**删除** `Policy.deliverable(...)`（它就是 §11 缺陷的载体）
+- `materialize/ItemMaterializer.java` —— `PENDING` 由 `Set` 改 `Map<net, 排队时刻>` + 2s 超时自愈（§11.4）；
+  新增 `observedSnapshot()` / `restoreObserved()` 供自检做全局状态隔离（§11.6）
+- `mixin/create/NetedSchematicannonItemHandlerMixin.java` / `mixin/ItemUnifiedStorageHandlerMixin.java`
+  —— 报量与显示一律改走 `MaterializeQuote.externalDeliverable(...)`（§11.2）
+- `command/BeyondEmcCommands.java` —— 新增 `/beyondemc why <item>`（§11.7）
+- `diag/MaterializeSelfTest.java` —— 新增「诊断隔离不变式」断言（§11.6）
+- `BeyondEmc.java` —— 自检段追加 `CreatePathwaySelfTest` 输出；整个自检段包在
+  `observedSnapshot`/`restoreObserved` 里，保证**自检零全局副作用**（§11.6）
 - `emc/EmcItemKeyRender.java` —— `getTooltipLines` 收敛为直接转发（**删除两行 tooltip 文案**）
 - `resources/assets/beyondemc/lang/{zh_cn,en_us}.json` —— 删 `types.beyondemc.emc_item_amount`
   与 `emc_item_hint` 两键
@@ -356,3 +385,121 @@ policy.deliverable(want, materializedAmount)         // 本类只读，绝不写
 - `docs/plan/RELEASE.md` L110
 - `docs/README.md` L137
 - `CHANGELOG.md`「0.3.2」节 + 0.3.0 正文"第三方管道看不到它们"一句
+
+---
+
+## 11. 0.3.2 发布后回归：实测缺陷与修复
+
+> 触发：使用者实测 **"蓝图大炮的清单里只有部分材料显示满足条件，另一部分显示无库存"**。
+> 结论：两条独立缺陷叠加，**都能用真实存档与日志取证**，均已修并端到端验证（§8.2 H）。
+
+### 11.1 取证（先取证，再动手）
+
+- **存档**（`tools/netaudit.py`，离线解析 `BDNet_0.dat`）：**15 项已学习，只有 14 条
+  `beyondemc:stack_type/emc_item` 条目**，缺的正是 `minecraft:gunpowder`。EMC 池 3066234，
+  另有 1 条真实库存（`minecraft:shulker_box`，带 `container` 组件）。**槽位未满**
+  （`slotCapacity=Long.MAX`、`slotMaxSize=Int.MAX`）⇒ 不是容量问题。
+- **日志**（`run/logs/latest.log`，1180 行）：
+  - 唯一一次成功重算在 `:846` —— `物化（第 1 次）：网络 0 EMC=3066234 → 14 条物化条目`（当时学会 14 项）；
+  - `:1114` `折算：minecraft:gunpowder ×1 → 192 EMC` ⇒ **火药是在那次重算之后才学会的**；
+  - `:1116` 最后一条本模组输出是"知识同步到达，已触发界面重建（第 4 次）"，
+    **此后到 `:1180` 退出再无任何"物化（第 N 次）"日志**。
+
+⇒ 现象与"火药从来没被物化过"完全吻合。
+
+### 11.2 根因一：判据分叉 —— 对外报量错误地要求「物化条目存在」
+
+物化条目是**派生数据**（`ItemMaterializer` 的"权威与派生"边界），可以合法地缺失或暂时陈旧；
+而**真实交付根本不看它** —— `InterfaceWithdrawService` 是"扣 EMC + 当场铸造"，只用
+`min(请求量, 余额 ÷ 购买价)`。
+
+第一版暴露路径却写成 `policy.deliverable(count,物化条目量)`，把"派生数据存在"当成了交付前提
+⇒ **对外比真实更严** ⇒ 条目缺失的材料显示"无库存"，其实一取就能取到。火药正是这一例。
+
+**修法**：删除 `Policy.deliverable(...)`（不提供任何"按条目截断"的方法），
+把对外报量收口成一个**纯函数** `MaterializeQuote.exposedAmount(want, affordable, allowed)`，
+并让 `externalDeliverable(net, info, want)` 成为两条暴露路径**唯一**的出口。
+算式里**没有"物化条目"这一项** —— 于是"条目缺失把量压成 0"在数学上不可能发生。
+
+### 11.3 根因二：条目永久陈旧（两个叠加的缺口）
+
+`MaterializeMath.solve` 有一条排除规则：**当前有真实库存的物品不物化**（避免与 BD 原生行重复）。
+而**真实库存的减少不改变 EMC**，原本没有任何触发点会因此重算 ⇒ 一旦某物品的真实库存被取走，
+它的物化条目**永久缺失**。
+
+- **修法**：在 `InterfaceWithdrawService` 的"真实库存放行"分支补上
+  `ItemMaterializer.scheduleRefresh(net)`（**触发点 ⑥**），注释写明"真实库存的减少不改变 EMC，
+  所以原来没有任何触发点；火药即此例"。
+
+### 11.4 配套：`PENDING` 去重标记的永久冻结
+
+`scheduleRefresh` 用 `PENDING` 合并同一 tick 的多次触发，原实现是 `Set` 去重 + 由队列任务清标记。
+若 `server.execute(...)` 的任务**没能被执行**（服务端正在停止、执行器已关等），标记会**永久残留**，
+此后每一次 `scheduleRefresh` 都在 `if (!PENDING.add(net)) return;` 处**静默返回** —— 物化层冻结，
+且**没有任何日志**。
+
+**修法**：`PENDING` 改为 `Map<DimensionsNet, 排队时刻>`（`WeakHashMap`），超过
+`PENDING_STALE_MS = 2_000 ms` 未跑即判定"任务已丢失"，打 **WARN** 并重新排队。
+一个 tick 是 50 ms，正常任务一个 tick 内就跑掉；2 秒远大于正常延迟，又能让被冻结的物化层
+**在下一次触发时自愈**，并留下证据。
+
+### 11.5 无头端到端验证：为什么必须走 RCON
+
+`runServer` 是 Gradle 的 JavaExec 任务，**不把 stdin 转发**给服务端 JVM ——
+`printf 'reload\n' | ./gradlew runServer` 收不到任何指令（实测：日志停在自检，`reload` 零输出）。
+
+而无头环境下**只有 `/reload` 一条路**能让 ProjectE 构建 EMC 表：
+`PECore#dataPackSync(OnDatapackSyncEvent)` 是无玩家的专用服务器上唯一会跑 `EMCMappingHandler.map`
+的入口，`map()` 结尾 `fireEmcRemapEvent()` → `EMCRemapEvent` → `ItemMaterializer.refreshAll()`。
+（`ServerStartedEvent` 时刻 EMC 表必然未就绪：`EMC 表就绪=false，remap 次数=0`。）
+
+⇒ 解法：`server.properties` 临时 `enable-rcon=true` + 口令，用 `tools/rcon.py`
+（纯 `socket` + `struct`，零依赖）从外部发 `reload` / `stop`。
+
+**完整流程**（已验证，证据 `run/verify-032-canon.log`）：
+
+```
+① 把真实存档铺成 run/world（先 `mv world world.bak`，验完还原）
+② ./gradlew runServer --console=plain          # 后台
+③ python tools/rcon.py 127.0.0.1 25575 <口令> reload
+④ 查日志：应出现唯一一条「物化（第 N 次）：网络 0 EMC=… → N 条物化条目」
+⑤ python tools/rcon.py … stop                  # 触发存档落盘
+⑥ python tools/netaudit.py run/world/data/BDNet_0.dat
+⑦ 还原 run/world、把 enable-rcon 改回 false
+```
+
+> 判定要点：`reload` 后**必须看到真实网络的 EMC 与条目数**（`EMC=3066234 → 15 条`）
+> 才算通过。只看到"自检 0 FAIL"是**不够的** —— §11.6 说明了为什么。
+
+### 11.6 诊断污染：自检不得留下全局副作用
+
+排查过程中发现：8 次重算全部落在 `网络 0 EMC=0` / `EMC=Long.MAX/4` 上，
+**真实网络那条 `EMC=3066234 → 15 条` 完全看不到**。
+
+原因：自检用 `new DimensionsNet(true)` 造临时网络去验证物化数学与写回，
+这些临时网络经 `refresh` / `scheduleRefresh` 被 `ItemMaterializer.observe` **登记进全局
+`OBSERVED` 集合后一直留在里面**；于是每次 `refreshAll` 都要为一批死网络空转，
+而日志的 `LOG_FIRST_N = 8` 上限被它们**占满**，真实网络那条被挤了出去。
+
+**修法**：新增 `ItemMaterializer.observedSnapshot()` / `restoreObserved(snapshot)`，
+在 `BeyondEmc.onServerStarted` 里把**整个自检段**包进 `try/finally`，
+结束时把 `OBSERVED` 还原成自检前的快照（只删自检期间新登记的，真实网络一律保留）。
+另在 `MaterializeSelfTest` 加一条**不变式断言**（快照内保留 / 快照后移除 / 收尾零泄漏）。
+
+> 修复后的实测：自检中期 `OBSERVED` 为 **9 个**（8 个临时 + 1 个真实），
+> 自检收尾还原为 **1 个**；`reload` 后日志**只有一条** —— `网络 0 EMC=3066234 → 15 条物化条目`。
+
+### 11.7 诊断命令 `/beyondemc why <item>`
+
+实机上看，"未学习"与"条目缺失"在界面上**长得一模一样**（都显示"无库存"），
+而原因有六种、处理方向完全不同。故新增：
+
+```
+/beyondemc why <item>
+① 归一化身份  ② 配置与 EMC 表就绪  ③ 是否要求已学习 / 本网络是否已学习
+④ 购买价与余额可买份数  ⑤ 存入侧 skipReason  ⑥ 现状（真实库存 + 物化条目）
+⑦ 结论 ← 只由 MaterializeQuote.externalDeliverable(...) 给出
+```
+
+**结论只由唯一入口给出**，所以命令输出不可能与真实行为分叉；中间几行只解释"为什么"。
+
