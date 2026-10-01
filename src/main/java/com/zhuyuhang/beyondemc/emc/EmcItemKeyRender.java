@@ -4,7 +4,6 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.wintercogs.beyonddimensions.api.storage.key.IStackKey;
 import com.wintercogs.beyonddimensions.api.storage.key.IStackRender;
 import com.wintercogs.beyonddimensions.util.StringFormat;
-import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -20,7 +19,6 @@ import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.neoforge.client.ClientTooltipFlag;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -123,6 +121,17 @@ public class EmcItemKeyRender implements IStackRender {
         }
     }
 
+    /**
+     * 物化条目的工具提示 = <b>物品自身的工具提示</b>，不附加任何本模组的说明行。
+     *
+     * <h2>为什么刻意不加标注</h2>
+     * 0.3.0 曾在这里追加两行（"可兑换：N" + "由网络 EMC 物化而来 —— 兑换会扣除 EMC"）。
+     * 按用户要求全部移除：物化条目在界面上应当与普通物品**无法区分**，
+     * 「它是 EMC 换出来的」这件事不需要在 tooltip 里解释（数量仍由
+     * {@link #renderAmount(long, int, int)} 画在图标上）。
+     *
+     * <p>因此本方法<b>不再使用 {@code amount} 参数</b> —— 但接口要求这个签名，故保留。
+     */
     @Override
     public List<Component> getTooltipLines(IStackKey<?> key, long amount, Item.TooltipContext tooltipContext,
                                           @Nullable Player player, TooltipFlag tooltipFlag) {
@@ -130,10 +139,7 @@ public class EmcItemKeyRender implements IStackRender {
         if (stack.isEmpty()) {
             return List.of();
         }
-        List<Component> lines = new ArrayList<>(stack.getTooltipLines(tooltipContext, player, tooltipFlag));
-        lines.add(Component.translatable("types.beyondemc.emc_item_amount", amount));
-        lines.add(Component.translatable("types.beyondemc.emc_item_hint").withStyle(ChatFormatting.DARK_GRAY));
-        return lines;
+        return stack.getTooltipLines(tooltipContext, player, tooltipFlag);
     }
 
     @Override

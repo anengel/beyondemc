@@ -151,7 +151,9 @@ INV-2 （扣费==交付）：扣的 EMC == 交付物品的原价之和；容量�
 | **物化物品条目（0.3 新增，派生）** | **`EmcItemKey`（`LongStackKey<EmcItemType>`）** | **`UnifiedStorage` 条目（独立 type bucket）** | **BD 自动** | **BD 自动（delta）** | **随网络销毁；可丢弃重建** |
 | 物化预算余量（诊断用） | 内存 | 仅运行时 | 无 | 不需要 | 每次物化重算 |
 
-> 物化条目落在**独立的 type bucket**（`bucketOf(key.getTypeId())`）。BD 对外的物品能力桥 `ItemUnifiedStorageHandler` **只读 `ItemStackKey` 分桶**（`api/capability/helper/unordered/ItemUnifiedStorageHandler.java:30-33,39,58,99`）⇒ 第三方模组的管道**看不见**物化条目、不占 `getSlots()`、不会被误抽。
+> 物化条目落在**独立的 type bucket**（`bucketOf(key.getTypeId())`）。BD 对外的物品能力桥 `ItemUnifiedStorageHandler` **只读 `ItemStackKey` 分桶**（`api/capability/helper/unordered/ItemUnifiedStorageHandler.java:30-33,39,58,99`）⇒ **原生状态下**第三方模组的管道看不见物化条目、不占 `getSlots()`、不会被误抽。
+>
+> ⚠️ **0.3.2 起本条已被主动放宽**：`ItemUnifiedStorageHandlerMixin` 在该桥的**原生可视槽之后**追加了一段只读物化区，让第三方管道（Create 蓝图大炮、AE2/RS 等）也能取用物化物品。但**收费红线不变** —— 真抽取一律导回 `UnifiedStorage.extract`，从而命中扣费铸造钩子；模拟抽取只读不算钱。取证、设计、风险与"为什么有序版 `ItemStackTypedHandler` 刻意不动"见 **`docs/plan/CREATE-INTEGRATION.md`**。
 
 ### 3.1 新增类型：`EmcItemKey` / `EmcItemType`（契约已按实读源码更正）
 
@@ -308,7 +310,7 @@ INV-2 （扣费==交付）：扣的 EMC == 交付物品的原价之和；容量�
 | 命令 | 新增 `/beyondemc materialize list \| rebuild \| clear` | 新增 |
 | 自动化（网络接口，按物品过滤器） | `extract(ItemStackKey, …)` + 钩子铸造路径 | **行为不变**，只是抽取后多一次 `refresh` |
 | **自动化（按标签 / 按槽位）** | `extract(TagKey,…)` / `extract(slot,…)` | ⚠️ **原本会零扣费命中物化条目**，必须按 §5.2 改道收费 |
-| 其它模组 | BD 的存储抽象 | 物品能力桥只读 `ItemStackKey` 分桶 ⇒ **看不到**物化条目、不占 `getSlots()`、不会被误抽（安全） |
+| 其它模组 | BD 的存储抽象 | 物品能力桥只读 `ItemStackKey` 分桶 ⇒ 原生状态下**看不到**物化条目、不占 `getSlots()`、不会被误抽。**0.3.2 起有意放宽**：无序桥（`ItemUnifiedStorageHandler`）追加只读物化区，让管道能取用 —— 但真抽取仍走 `UnifiedStorage.extract` ⇒ 照常扣 EMC（见 `CREATE-INTEGRATION.md`） |
 | 自检 | `/beyondemc selftest` | 新增 §10.2 的断言 |
 
 > **读取正确性的唯一口径**：任何访问方读到的数量，都必须等于"服务端按 §2.3 从 EMC 现场算出的数量"。任何缓存/副本都不得作为判据来源。
@@ -398,6 +400,7 @@ INV-2 （扣费==交付）：扣的 EMC == 交付物品的原价之和；容量�
 物化条目用的是**本模组自定义的键类型**。回退到 0.2（或直接卸载本模组）时该类型未注册，`StackKeyRegistry.getType(id)` 返回 `null` → `IStackKey.CODEC` 的 `dispatch` 抛异常 → `AbstractUnorderedStackHandler.deserializeNBT` 的 `catch(Throwable)` 吞掉（`AbstractUnorderedStackHandler.java:889-898`）⇒ **条目级静默丢弃**。
 
 - **不会**变成"免费的真实库存"——类型不匹配 `ItemStackKey`，物品能力桥的分桶也拿不到它（`ItemUnifiedStorageHandler.java:30-33`）。
+  （注：0.3.2 的 `ItemUnifiedStorageHandlerMixin` **只在本模组加载时**才追加那段只读物化区；回退/卸载后 Mixin 本身不复存在，故本条对回退场景依然成立。）
 - **不会**损坏存档——丢弃是条目级的，其余数据（EMC 池、学习集合、真实库存）完好。
 - 代价：回退后 EMC 池本身也会被丢弃（0.2 的已知行为 R9，README 已警示"卸载前先清空 EMC"）。这是 0.2 既有性质，不是 0.3 引入的。
 
@@ -524,7 +527,8 @@ tools\gradlew-here.cmd build       # 重新出 jar
 - [ ] 点击兑换 → EMC 减少、物品到手、`refresh` 后全部条目数量一起收缩；INV-2 全绿
 - [ ] **直接抽取物化条目（按标签 / 按槽位）会扣 EMC**，不存在零扣费交付（INV-1′）；**EMC 不足时不交付任何数量（cancel，不交半份）**
 - [ ] 有过滤器的 BD 网络接口能把物化物品抽走并扣 EMC；模拟抽取**不扣费**
-- [ ] 第三方管道**看不到**物化条目（`getSlots()` 不含它们）
+- [x] 第三方管道**能看到**物化条目（0.3.2 起 `getSlots()` 含只读物化区）—— 且抽取时照常扣 EMC（模拟不扣费）。
+      取证与设计见 `CREATE-INTEGRATION.md`；有序版机器槽位视图（`ItemStackTypedHandler`）**刻意仍不暴露**（那里没有网络、无法收费）
 - [ ] `materializeItems=false` 后 → 行为与 0.2 完全一致（**条目清空** + 兜底注入）
 - [ ] **回退演练**：把存档放到 0.2 + 0.2 的 jar 启动 → 不崩、不超发、EMC 与学习集合照常
 - [ ] 0.2 存档直接进 0.3 → 不崩，首个触发点后条目正确生成

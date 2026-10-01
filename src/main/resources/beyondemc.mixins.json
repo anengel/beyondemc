@@ -8,6 +8,7 @@
     "ClientNetStorageAccessor",
     "DimensionsNetMenuMixin",
     "DimensionsNetMixin",
+    "ItemUnifiedStorageHandlerMixin",
     "UnifiedStorageExtractMixin"
   ],
   "client": [

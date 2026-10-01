@@ -35,12 +35,15 @@ public final class MixinTargetCheck {
     }
 
     /**
-     * 可选集成（目前是 JEI）的注入目标。
+     * 可选集成（JEI / Create）的注入目标。
      *
-     * <p>为什么需要单独一组：JEI 的类**不该被本模组的任何类引用**（否则 JEI 缺席时会
-     * {@code NoClassDefFoundError}），所以这里一律用**字符串类名 + 反射**。
+     * <p>为什么需要单独一组：这些类的**存在性本身**取决于对应模组。JEI 的类
+     * 不该被本模组的任何类引用（否则 JEI 缺席时会 {@code NoClassDefFoundError}），
+     * Create 侧同理 —— 所以这里一律用**字符串类名 + 反射**。
      * 而 {@code JeiFillSelfTest} 只能验证纯逻辑，验证不了"注入点还在不在"——
      * 那正是这次 B 首轮失效时无法判断的那一环。
+     *
+     * <p>{@code params} 为 null 表示查字段（与 {@link #TARGETS} 同约定）。
      */
     private static final List<OptionalTarget> OPTIONAL_TARGETS = List.of(
             new OptionalTarget("jei",
@@ -48,7 +51,29 @@ public final class MixinTargetCheck {
                     "transferRecipe",
                     "java.util.List", "java.util.List", "java.util.List",
                     "mezz.jei.api.gui.ingredient.IRecipeSlotsView",
-                    "boolean", "boolean", "boolean")
+                    "boolean", "boolean", "boolean"),
+            // ---- Create（机械动力）集成 ----
+            // 门控判据类：换一个 Create 类时，BeyondEmcCreateMixinPlugin 的探测就会失效
+            new OptionalTarget("create",
+                    "com.simibubi.create.api.behaviour.movement.MovementBehaviour",
+                    "REGISTRY", (String[]) null),
+            // 我们真正注入的宿主：BD 的「蓝图接口」物品处理器
+            new OptionalTarget("create",
+                    "com.wintercogs.beyonddimensions.integration.module.create.block.entity"
+                            + ".SchematicannonPathWayBlockEntity$NetedSchematicannonItemHandler",
+                    "getStackInSlot", "int"),
+            new OptionalTarget("create",
+                    "com.wintercogs.beyonddimensions.integration.module.create.block.entity"
+                            + ".SchematicannonPathWayBlockEntity$NetedSchematicannonItemHandler",
+                    "extractItem", "int", "int", "boolean"),
+            // 「Create 侧的门槛」哨兵：我们的整套修法都建立在这个方法用
+            // extractItem(...,simulate=true) 当"有料"判据之上。Create 一旦改了它的
+            // 名字或行为，这里会报 FAIL，而不是让功能静默消失后我们找不到原因。
+            new OptionalTarget("create",
+                    "com.simibubi.create.content.schematics.cannon.SchematicannonBlockEntity",
+                    "grabItemsFromAttachedInventories",
+                    "com.simibubi.create.content.schematics.requirement.ItemRequirement$StackRequirement",
+                    "boolean")
     );
 
     private static final List<Target> TARGETS = List.of(
@@ -76,6 +101,21 @@ public final class MixinTargetCheck {
                     false, "extract",
                     "com.wintercogs.beyonddimensions.api.storage.key.IStackKey",
                     "long", "boolean", "boolean"),
+            // 通用物品能力桥：在原生可视槽之后追加"只读物化区"（0.3.2）
+            // base 是从 getSlots() 反推的，所以这三处必须同时存在，缺一即错位。
+            //
+            // ⚠️ 这里**只有无序版**（ItemUnifiedStorageHandler）。有序版
+            // ItemStackTypedHandler 已核实**不该动**：它包的是机器自己的固定槽位
+            // （熔炉输入/燃料/输出、Create 装置搬运存储），走 BD 的 CommonHandlerMap
+            // （有序 StackHandler），与维度网络是不同的能力体系 ——
+            // 拿不到 DimensionsNet 就拿不到 EMC 余额，暴露物化条目等于零扣费送物品。
+            // 详见 docs/plan/CREATE-INTEGRATION.md §3。
+            new Target("com.wintercogs.beyonddimensions.api.capability.helper.unordered.ItemUnifiedStorageHandler",
+                    false, "getSlots"),
+            new Target("com.wintercogs.beyonddimensions.api.capability.helper.unordered.ItemUnifiedStorageHandler",
+                    false, "getStackInSlot", "int"),
+            new Target("com.wintercogs.beyonddimensions.api.capability.helper.unordered.ItemUnifiedStorageHandler",
+                    false, "extractItem", "int", "int", "boolean"),
             // 客户端视图：排序缓存字段 + 搜索过滤方法 + 真实存储字段（Accessor/Invoker）
             new Target("com.wintercogs.beyonddimensions.common.menu.widget.ClientNetStorage",
                     true, "cacheIndexes", (String[]) null),
@@ -123,7 +163,7 @@ public final class MixinTargetCheck {
             }
         }
 
-        // ---- 可选集成（JEI）的注入目标 ----
+        // ---- 可选集成（JEI / Create）的注入目标 ----
         // 这是"B 到底有没有接上"唯一不依赖 JEI 交互的判据：客户端启动即核对。
         int optionalChecked = 0;
         int optionalSkipped = 0;
@@ -137,7 +177,11 @@ public final class MixinTargetCheck {
             try {
                 Class<?> owner = Class.forName(t.className(), false,
                         MixinTargetCheck.class.getClassLoader());
-                owner.getDeclaredMethod(t.member(), resolve(t.params()));
+                if (t.params() == null) {
+                    owner.getDeclaredField(t.member());
+                } else {
+                    owner.getDeclaredMethod(t.member(), resolve(t.params()));
+                }
                 optionalChecked++;
             } catch (Throwable e) {
                 String reason = e.getClass().getSimpleName()

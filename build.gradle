@@ -132,6 +132,35 @@ dependencies {
                 : "mezz.jei:jei-1.21.1-neoforge:${jei_version}")
         logger.lifecycle("[BeyondEMC] withJei 已启用：JEI ${jei_version} 会进入 run 类路径")
     }
+
+    // ------------------------------------------------------------
+    // 机械动力 Create —— **可选**依赖，且**只在测试时需要**。
+    //
+    // 为什么没有 compileOnly：
+    //   我们对 Create 的集成方式是 Mixin Beyond Dimensions 的「蓝图接口」方块实体
+    //     ...integration.module.create.block.entity
+    //        .SchematicannonPathWayBlockEntity$NetedSchematicannonItemHandler
+    //   注入的方法签名（getStackInSlot / extractItem / getSlots）全是 Minecraft 类型，
+    //   不引用任何 Create 类型 —— 这样 Create 缺席时我们的 mixin 类也能安全加载。
+    //   所以编译期根本不需要 Create。见 gradle.properties 的 create_version 注释。
+    //
+    // 为什么不需要 flywheel / ponder / Registrate：
+    //   它们已内嵌在 create jar 的 META-INF/jarjar/ 里，由 NeoForge 的 jarJar 自动带上。
+    //
+    // 为什么用 -PwithCreate 开关：
+    //   与 withJei 同理（Create 含大量客户端渲染依赖），保持 runServer / 无头自检的
+    //   类路径干净。想实测「蓝图接口」时用 tools/play.cmd 带上它。
+    // ------------------------------------------------------------
+    def createJar = file("libs/create-1.21.1-${create_version}.jar")
+    if (providers.gradleProperty('withCreate').isPresent()) {
+        if (!createJar.exists()) {
+            throw new GradleException(
+                    "[BeyondEMC] withCreate 已启用，但找不到 ${createJar}。"
+                            + " 获取方式见 libs/README.md（文件名必须是 ASCII，不能带中文方括号前缀）。")
+        }
+        runtimeOnly files(createJar)
+        logger.lifecycle("[BeyondEMC] withCreate 已启用：Create ${create_version} 会进入 run 类路径")
+    }
 }
 
 // ===== 用 src/main/templates 展开 neoforge.mods.toml 里的 ${} 占位符 =====

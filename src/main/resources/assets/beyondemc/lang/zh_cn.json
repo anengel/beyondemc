@@ -1,7 +1,5 @@
 {
   "types.beyondemc.emc_type.name": "EMC（等价能量）",
   "types.beyondemc.emc_amount": "已存储：%s EMC",
-  "types.beyondemc.emc_hint": "存入有 EMC 价值的物品即可累积",
-  "types.beyondemc.emc_item_amount": "可兑换：%s",
-  "types.beyondemc.emc_item_hint": "由网络 EMC 物化而来 —— 兑换会扣除 EMC"
+  "types.beyondemc.emc_hint": "存入有 EMC 价值的物品即可累积"
 }

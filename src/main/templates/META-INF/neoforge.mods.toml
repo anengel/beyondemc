@@ -32,6 +32,14 @@ config="${mod_id}.mixins.json"
 [[mixins]]
 config="${mod_id}.jei.mixins.json"
 
+# Create 集成的 Mixin 同样放在**独立配置**里。
+# 这次的原因与 JEI 类似但不同：目标类**本身存在**（在 BD 的 jar 里），
+# 可它的方法签名引用了 Create 的 MaterialChecklist / SchematicannonBlockEntity
+# —— Create 缺席时加载它（进而加载我们的 mixin 类）会 NoClassDefFoundError。
+# 门控由 BeyondEmcCreateMixinPlugin 负责（见该配置的 plugin 键）。
+[[mixins]]
+config="${mod_id}.create.mixins.json"
+
 # ============ 依赖 ============
 # ordering="AFTER" 对 beyonddimensions / projecte 是必需的：
 # 我们会对它们的类做 Mixin，目标类必须先存在于类路径上。
@@ -74,6 +82,17 @@ type="optional"
 versionRange="[19,)"
 ordering="AFTER"
 side="CLIENT"
+
+# 机械动力 Create —— **可选**依赖，只用于「蓝图接口」集成：
+# 让 Create 的蓝图大炮能从维度网络取用**已物化**的物品（按购买价扣除网络 EMC）。
+# 不装 Create 时 BD 不会注册「蓝图接口」方块，我们的 Create Mixin 也会被门控插件整体跳过。
+# side="BOTH"：BD 的蓝图接口方块实体是普通方块实体（非客户端专有）。
+[[dependencies.${mod_id}]]
+modId="create"
+type="optional"
+versionRange="[6.0.10,)"
+ordering="AFTER"
+side="BOTH"
 
 [features.${mod_id}]
 javaVersion="[21,)"

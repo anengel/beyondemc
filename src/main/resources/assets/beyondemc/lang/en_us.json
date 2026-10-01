@@ -1,7 +1,5 @@
 {
   "types.beyondemc.emc_type.name": "EMC",
   "types.beyondemc.emc_amount": "Stored: %s EMC",
-  "types.beyondemc.emc_hint": "Deposit EMC-valued items to fill this up",
-  "types.beyondemc.emc_item_amount": "Exchangeable: %s",
-  "types.beyondemc.emc_item_hint": "Materialized from network EMC — exchanging spends EMC"
+  "types.beyondemc.emc_hint": "Deposit EMC-valued items to fill this up"
 }

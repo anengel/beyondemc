@@ -235,6 +235,10 @@ public class BeyondEmc {
         for (String line : JeiFillSelfTest.run()) {
             LOGGER.info("[BeyondEMC] {}", line);
         }
+        LOGGER.info("[BeyondEMC] ---- 第三方暴露：Create 蓝图接口 / 通用物品能力桥（0.3.2）----");
+        for (String line : com.zhuyuhang.beyondemc.diag.CreatePathwaySelfTest.run()) {
+            LOGGER.info("[BeyondEMC] {}", line);
+        }
         LOGGER.info("[BeyondEMC] ===== 自检结束 =====");
     }
 }

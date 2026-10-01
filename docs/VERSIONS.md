@@ -43,8 +43,27 @@
 |---|---|---|
 | `libs/beyonddimensions-1.21.1-0.7.30.jar` | 3550119 | modId `beyonddimensions`，version `0.7.30`，要求 NeoForge `[21.1.194,)` / MC `[1.21.1]`，MIT |
 | `libs/projecte-1.21.1-1.1.0.jar` | 2426228 | modId `projecte`，version `1.1.0`，要求 NeoForge `[21.1.119,)` / MC `[1.21.1]`，MIT；构建时间戳 `2025-06-03`，与 CurseForge fileId `6611984` 的元数据吻合 |
+| `libs/create-1.21.1-6.0.10.jar` | 19123767 | modId `create`，version `6.0.10`，要求 NeoForge `[21.1.219,)` / MC `1.21.1`。**可选依赖，且只在测试时需要**（我们的 Mixin 不引用任何 Create 类型）。`META-INF/jarjar/` 内已内嵌 flywheel 1.0.6 / ponder 1.0.82 / Registrate 1.3.0，**不需要**单独提供，也**不需要** Modrinth Maven |
 
 原始文件名含中文与方括号，已重命名为 ASCII（jar 内容未动，字节数不变）。
+
+Create 不进 `compileOnly`，只在 `-PwithCreate` 时进 `runtimeOnly` —— 理由与实测方法见下方「Create 集成」节。
+
+### Create 集成（可选依赖）的接入方式
+
+```groovy
+def createJar = file("libs/create-1.21.1-${create_version}.jar")
+if (providers.gradleProperty('withCreate').isPresent()) {
+    runtimeOnly files(createJar)   // 没有 compileOnly
+}
+```
+
+| 判据 | 结论 | 依据 |
+|---|---|---|
+| 需要 `compileOnly` 吗 | **不需要** | 我们对 Create 的集成是 Mixin **BD** 的「蓝图接口」方块实体（`...integration.module.create.block.entity.SchematicannonPathWayBlockEntity$NetedSchematicannonItemHandler`），注入的 `getSlots()I` / `getStackInSlot(I)ItemStack` / `extractItem(IIZ)ItemStack` 全是 Minecraft 类型，不引用 Create 类型 —— 这样 Create 缺席时我们的 mixin 类也能安全加载 |
+| 需要单独准备 flywheel / ponder 吗 | **不需要** | `create-1.21.1-6.0.10.jar` 的 `META-INF/jarjar/` 含 `flywheel-neoforge-1.21.1-1.0.6.jar`、`ponder-neoforge-1.0.82+mc1.21.1.jar`、`Registrate-MC1.21-1.3.0+67.jar`，由 NeoForge jarJar 自动带上 |
+| 需要 Modrinth Maven 仓库吗 | **不需要** | 同上；且 `libs/` 已是首选接入方式 |
+| Create 缺席时会怎样 | 安全降级 | BD 的 `CreateModule` 标了 `@BDIntegrationModule(modId = OtherModIds.CREATE)`，不注册「蓝图接口」方块；我们的 `beyondemc.create.mixins.json` 由 `BeyondEmcCreateMixinPlugin` 按**类路径探测**整体跳过 |
 
 ```groovy
 compileOnly files("libs/beyonddimensions-1.21.1-0.7.30.jar")

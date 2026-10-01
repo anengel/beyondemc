@@ -8,17 +8,15 @@ import com.wintercogs.beyonddimensions.api.storage.key.KeyAmount;
 import com.wintercogs.beyonddimensions.api.storage.key.impl.ItemStackKey;
 import com.zhuyuhang.beyondemc.BeyondEmc;
 import com.zhuyuhang.beyondemc.config.BeyondEmcConfig;
-import com.zhuyuhang.beyondemc.core.EmcAvailability;
 import com.zhuyuhang.beyondemc.core.ExtractContext;
 import com.zhuyuhang.beyondemc.core.MintingGuard;
 import com.zhuyuhang.beyondemc.emc.EmcDepositHandler;
 import com.zhuyuhang.beyondemc.emc.EmcItemKey;
 import com.zhuyuhang.beyondemc.emc.NetEmcAccessor;
-import com.zhuyuhang.beyondemc.knowledge.NetKnowledgeStore;
 import com.zhuyuhang.beyondemc.materialize.ItemMaterializer;
+import com.zhuyuhang.beyondemc.materialize.MaterializeQuote;
 import com.zhuyuhang.beyondemc.materialize.MaterializingGuard;
 import moze_intel.projecte.api.ItemInfo;
-import moze_intel.projecte.api.proxy.IEMCProxy;
 import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
@@ -193,12 +191,7 @@ public final class InterfaceWithdrawService {
             return deny(materialized, tryExtract);
         }
 
-        // ---- 3. EMC 表未就绪不兑换 ----
-        if (!EmcAvailability.isReady()) {
-            return deny(materialized, tryExtract);
-        }
-
-        // ---- 4. 身份归一 + 一致性 ----
+        // ---- 3. 身份归一 + 一致性 ----
         // ⚠️ 堵刷物品漏洞的第一道闸（结构性）：**铸造出来的必须就是定价用的那个身份**。
         // 若过滤器里放的是附魔钻石剑，它的归一化身份是普通钻石剑 —— 两者不同，直接拒绝铸造；
         // 否则就会"按普通剑的价格铸出附魔剑"，也就是刷物品。
@@ -217,30 +210,26 @@ public final class InterfaceWithdrawService {
             return pass(tryExtract);
         }
 
-        if (BeyondEmcConfig.exchangeRequiresKnowledge() && !NetKnowledgeStore.knows(net, info)) {
-            // 未学习：原生路径放行（原生抽取自然返回 0）；物化路径则明确拒绝，绝不白给
-            return deny(materialized, tryExtract);
-        }
-
         // ---- 4. 定价与余额 ----
-        long unitPrice;
-        try {
-            unitPrice = IEMCProxy.INSTANCE.getValue(info); // 购买价
-        } catch (Throwable t) {
+        // ⚠️ 这一段必须与两条「把物化条目暴露给第三方」的路径（Create 蓝图接口、
+        // BD 通用物品能力桥）共用同一个实现 —— 即 MaterializeQuote。
+        // 本类在 0.3.0 曾经因为"两条路径各自判断、标准不一致"出过一次刷物品漏洞，
+        // 新增暴露路径时绝不能再各写一份判断链。
+        //
+        // policy 覆盖了原先散在这里的几项：EMC 表就绪 / 已学习 / 可达购买价 / 余额。
+        // 其中"EMC 表未就绪"原先在更早处单独判过，行为等价：两者都归入 deny 分支。
+        MaterializeQuote.Policy policy = MaterializeQuote.policy(net, info);
+        if (policy == null) {
             return deny(materialized, tryExtract);
         }
-        if (unitPrice <= 0L) {
-            // 物化路径**不沿用**原生路径的"放行"写法 —— 那会留下零扣费交付的口子
-            return deny(materialized, tryExtract);
-        }
-
-        long balance = NetEmcAccessor.getEmc(net);
-        long affordable = balance / unitPrice;
-        long want = Math.min(tryExtract.amount(), affordable);
+        long unitPrice = policy.unitPrice();
+        // 真实库存路径不带物化量约束（Long.MAX_VALUE = 不设上限），
+        // 于是这里的结果恰好等于原先的 min(tryExtract.amount(), affordable)。
+        long want = policy.deliverable(tryExtract.amount(), Long.MAX_VALUE);
         if (want <= 0L) {
             // 买不起：拒绝这次抽取（不要交半份），接口本周期就输出不了东西
             logThrottled("网络 {} 余额 {} 不足以兑换 {}（单价 {}），本次抽取被拒绝",
-                    net.getId(), balance, info, unitPrice);
+                    net.getId(), policy.balance(), info, unitPrice);
             return cancel(tryExtract);
         }
 

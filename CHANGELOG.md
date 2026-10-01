@@ -4,10 +4,74 @@
 
 ## [未发布]
 
-对应 tag `v0.3.1` 之后的提交（`2e5b8e3` 起）。**只碰 `tools/` 与 `.gitignore`，`src/` 零改动**，
-因此发布 jar `beyondemc-1.21.1-neoforge-0.3.1.jar` 与其 SHA-256 均不变，可放心继续使用。
+对应 tag `v0.3.1` 之后的提交（`2e5b8e3` 起）。本节分两部分：
+**0.3.2 的 Create 集成（改了 `src/`）** 与 **更早一轮的工具修复（只碰 `tools/`）**。
 
-### 修正
+### 新增 —— Create（机械动力）集成与「第三方可见化」（0.3.2，`src/` 有改动）
+
+- **蓝图大炮能用上物化物品了。** Beyond Dimensions 的「蓝图接口」方块实体
+  （`SchematicannonPathWayBlockEntity$NetedSchematicannonItemHandler`）原先只对网络做
+  **精确键查询**（`getStackByKey(new ItemStackKey(…))`，底层就是 `HashMap.getOrDefault`），
+  而物化条目的键是 `EmcItemKey` —— 两者 `equals` / `hashCode` 都对不上，于是
+  `getStackInSlot` 恒为空。更关键的是：Create 判定「这个槽有料吗」的**唯一依据**是
+  **模拟抽取 `extractItem(slot, …, true)` 的返回值**（`updateChecklist` 与
+  `ItemHelper.extract` 都是先跑一遍 `simulate=true` 估量，够了才真抽），
+  模拟说"没料"，真抽取那一遍**永远不会被调用**。
+  现由 `NetedSchematicannonItemHandlerMixin` 补上这两处：
+  `getStackInSlot` 回填物化条目（供大炮界面显示"已收集"），
+  `extractItem(..., simulate=true)` 按报价补报可交付量。
+  **真抽取一行未改** —— 它本来就通：走 `storage.extract(ItemStackKey, …)` →
+  `UnifiedStorage.extract` → 扣 EMC + 铸造，且返回的键恰好是 `ItemStackKey`，
+  能通过 BD 的 `instanceof ItemStackKey` 守卫。
+- **第三方管道也能看见物化物品了**（`ItemUnifiedStorageHandlerMixin`）。
+  BD 的物品能力桥按 **key 类型 id 分桶**枚举（只读 `ItemStackKey` 桶），而物化条目在
+  `beyondemc:stack_type/emc_item` 桶 ⇒ 结构性看不见。现于该桥的**原生可视槽之后**
+  追加一段「只读物化区」，原有槽位映射逐位不变（含 BD 那个"容量预留槽"）。
+- **⚠️ 收费红线没有放宽。** 两条暴露路径的**真抽取都导回 `UnifiedStorage.extract`**，
+  照常扣 EMC；模拟抽取只读存储、只算数量。报价与扣费**共用同一算式**
+  （新类 `materialize/MaterializeQuote`），因此不会出现"模拟说 64 个、真取只给 1 个"。
+  这条清单来自一次真实教训（0.3.0 的刷物品漏洞就是因为两条路径各自判断、标准不一致）。
+- **有序版 `ItemStackTypedHandler` 刻意不动。** 它包的是**机器自己的固定槽位**
+  （熔炉输入 / 燃料 / 输出、Create 装置搬运本地存储），走 BD 的 `CommonHandlerMap`，
+  与维度网络是不同的能力体系；其字段类型 `StackHandler` 与 `UnifiedStorage`
+  **互不相交**（各自 `implements IStackHandler`，无继承关系 —— javac 直接判定
+  `instanceof` 不可能成立）。拿不到网络就拿不到 EMC 余额，暴露物化条目等于零扣费送物品。
+- **物化条目不再有额外的 tooltip 说明行**：删掉「可兑换：N」与
+  「由网络 EMC 物化而来 —— 兑换会扣除 EMC」两行（`EmcItemKeyRender` + 两个语言文件）。
+  物化条目在界面上与普通物品完全一致（数量仍由 `renderAmount` 画在图标上）。
+- **Create 的可选依赖接线**：`build.gradle` 加 `-PwithCreate`
+  （**只在 `runClient` 默认开启**，不影响 `runServer` 自检），
+  `neoforge.mods.toml` 声明 `create` 为 `optional` + `AFTER` + `side=BOTH`，
+  新增 `beyondemc.create.mixins.json` 与门控插件 `BeyondEmcCreateMixinPlugin`
+  （判据用**类路径探测**，不用 `ModList` —— 后者在本项目的 JEI 集成上实测失效过）。
+  **不需要** flywheel / ponder / Registrate：它们已内嵌在 create jar 的 `META-INF/jarjar/` 里。
+- **新增自检** `diag/CreatePathwaySelfTest`（报价边界 6 例、报价与收费段算式一致 64 组、
+  展示栈夹取、空入参安全、桶分离不变式），并在 `MixinTargetCheck` 登记通用桥 3 个目标
+  与 Create 侧 4 个可选目标（含 `grabItemsFromAttachedInventories` 的**门槛哨兵**：
+  Create 一旦改掉那个方法，我们会看到 FAIL 而不是让功能静默消失）。
+
+> **已知取舍（玩家需知情）**：物化条目对第三方可见后，接入网络的**自动抽取装置**
+> （AE2 导入总线、漏斗等）会主动把网络 EMC 换成物品，而这些物品再存回网络时按**回收价**
+> 折算（≤ 买入价）⇒ 会造成**静默的 EMC 净损失**。这是"让物化物品真实可用"的必然代价，
+> 已与使用者确认接受。观测方法：看 `[BeyondEMC] 接口兑换：` 日志频率与 EMC 余额曲线。
+> **成因、量级、观测与潜在处置**的完整分析见 `docs/plan/CREATE-INTEGRATION.md` §5。
+
+> **本轮验证（截至本条目）**：
+> - `compileJava` **BUILD SUCCESSFUL**（仅 1 条既有无关的 deprecation 注记）。
+> - 无头 `runServer` 自检：**`Create/第三方暴露` 6 项通过**；
+>   `Mixin 目标存活性` **核对了 10 个目标全部存在**（较 0.3.1 新增无序桥 3 个），
+>   可选集成 5 项（JEI 1 + Create 4）因对应模组未加载而**正确跳过**。
+> - **结构门控行为正确**：无头环境无 Create 时，日志显示
+>   `Create Mixin 配置已加载` + `门控判定：create 在类路径上=false`，且**不报错**、不应用 Mixin。
+> - **离线字节码核对**（`javap`，对真实 jar）：`NetedSchematicannonItemHandler` 的字段
+>   `net` / `stacksSnapshot` 与 `getSlots` / `getStackInSlot(int)` / `extractItem(int,int,boolean)`
+>   全部存在；`ItemUnifiedStorageHandler` 的 `private final UnifiedStorage storage` 精确匹配；
+>   Create 侧 `SchematicannonBlockEntity#grabItemsFromAttachedInventories`、
+>   `MovementBehaviour#REGISTRY` 均在。
+> - ⏳ **待人工验收（需 GUI 客户端）**：蓝图大炮实机开工取料与扣费、
+>   通用桥抽物化物品、模拟不扣费、jarJar 生效 —— 清单见 `docs/plan/CREATE-INTEGRATION.md` §8.2。
+
+### 修正 —— 工具（只碰 `tools/`）
 
 - **`tools/install-to-mods.ps1` 会把改了名的同一个模组装成两份。**
   整合包实例会给 jar 加中文名前缀，例如 `[等价交换重制版] ProjectE-1.21.1-PE1.1.0.jar`
@@ -34,7 +98,7 @@
 - **修 `-ListOnly` 的隐性越权**：原写法在"恰好 1 个候选"时不会退出，而是继续往下
   走到复制那一步；`-ListOnly -ModsPath` 组合也会被忽略。现对任何候选数量都只报不改。
 
-### 新增
+### 新增 —— 工具
 
 - `tools/install-to-mods.ps1 -ListOnly`：只列出候选 `mods` 目录、不改任何文件
   （含 `-ListOnly -ModsPath` 组合）。
@@ -103,7 +167,9 @@ Minecraft 1.21.1 · NeoForge 21.1.249+ · 需要 Beyond Dimensions 0.7.30+ 与 P
   - **取出即连带收缩**：取走 1 颗钻石 ⇒ `EMC=70` ⇒ 钻石 1 个 + 泥土 70 个。
   - **已有真实库存的物品不物化**，避免与 BD 原生库存行重复。
   - 条目会随网络**存档 / 跨维度 / 多人同步**，走 BD 原生的持久化与 delta 广播链路。
-  - 落进**独立的 type bucket**（`beyondemc:stack_type/emc_item`），第三方管道看不到它们。
+  - 落进**独立的 type bucket**（`beyondemc:stack_type/emc_item`），原生的第三方管道看不到它们。
+    （**0.3.2 起已主动放宽**：无序物品能力桥追加只读物化区，让管道能取用 —— 但真抽取仍走
+    `UnifiedStorage.extract`，照常扣 EMC。见本文件顶部「Create 集成与第三方可见化」一节。）
   - **可丢弃重建**：物化条目是"EMC 池 + 学习集合"的**纯函数派生**，
     物化层损坏不丢任何数据 —— `/beyondemc materialize rebuild` 一键按权威数据重建。
 - **命令**：`/beyondemc materialize list | rebuild | clear`

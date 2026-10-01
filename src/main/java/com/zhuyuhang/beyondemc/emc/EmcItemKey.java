@@ -36,10 +36,18 @@ import java.util.stream.Stream;
  * BD 的存储是 {@code key → long} 的无序映射（{@code AbstractUnorderedStackHandler.java:53-71}）。
  * 若复用 {@code ItemStackKey}，物化出来的钻石会和玩家<b>真实存入的钻石合并成同一个数量</b>，
  * 既无法区分，也无法判断抽取时该不该扣 EMC；回退到 0.2 后更会直接变成<b>免费真实库存</b>。
- * 用本模组自定义的键类型则：落进独立 type bucket（第三方管道看不见，见
- * {@code ItemUnifiedStorageHandler.java:30-33}），且回退/卸载时因类型未注册而被 BD 静默丢弃
+ * 用本模组自定义的键类型则：落进独立 type bucket，且回退/卸载时因类型未注册而被 BD 静默丢弃
  * （{@code IStackKey.CODEC} 的 dispatch 找不到类型 → {@code deserializeNBT} 的
  * {@code catch(Throwable)} 吞掉，{@code AbstractUnorderedStackHandler.java:889-898}）——不超发、不坏档。
+ *
+ * <p><b>⚠️ 0.3.2 起「独立 bucket ⇒ 第三方管道看不见」这条已被主动放宽</b>：
+ * {@code ItemUnifiedStorageHandlerMixin} 在该能力桥的<b>原生可视槽之后</b>追加了一段<b>只读物化区</b>，
+ * 让第三方管道（Create 蓝图大炮、AE2/RS 等）也能"看见"并取用物化物品。
+ * 但<b>收费红线不变</b>：真抽取一律导回 {@code UnifiedStorage.extract(IStackKey,long,boolean,boolean)}，
+ * 从而命中 {@code InterfaceWithdrawService} 的扣费铸造钩子；模拟抽取（{@code simulate=true}）只读不算钱。
+ * 任何绕过该出口、直接改写桶的"优化"都会重开 0.3.0 已修的零扣费缺口（{@code S-0.3-7}）。
+ * 取证、设计、风险，以及"为什么有序版 {@code ItemStackTypedHandler} 刻意不动"，见
+ * {@code docs/plan/CREATE-INTEGRATION.md}。
  *
  * <h2>⚠️ 三条必须守住的不变式</h2>
  * <ol>
