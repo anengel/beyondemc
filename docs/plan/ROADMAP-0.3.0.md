@@ -528,7 +528,7 @@ tools\gradlew-here.cmd build       # 重新出 jar
 | ID | 项 | 严重度 | 处置 |
 |---|---|---|---|
 | S-0.3-1 | `LongStackKey` / `IStackKey` 携带 `ItemInfo` 时，`codec()` 与 `equals` 的正确写法 | ✅ **已解除** | 已用实读源码 + `javap -p -c` 核实：`equals` 基类比 `getTypeId()`、`codec()` 用 `ItemInfo.MAP_CODEC`、网络用 `ItemInfo.STREAM_CODEC`（§3.1）。剩余动作：阶段 A 先写最小实现跑通 NBT/网络往返 |
-| **S-0.3-7** | `EmcItemKey` 抽取改道是否覆盖 BD **全部**抽取入口（slot / tag / key），以及 `MaterializingGuard` 是否会造成 refresh 与外部抽取的重入死角 | 🔴 高 | 阶段 C：自检 + 双路径实测（按槽位抽取、按标签抽取各一次），断言 EMC 被扣 |
+| **S-0.3-7** | `EmcItemKey` 抽取改道是否覆盖 BD **全部**抽取入口（slot / tag / key），以及 `MaterializingGuard` 是否会造成 refresh 与外部抽取的重入死角 | ✅ **已解除** | 静态：`UnifiedStorage.extract(int slot,…)`（`:110-114`）与 `extract(TagKey,…)`（`:136-142`）都委托到 `extract(IStackKey,…)`，钩子就在 `:122` ⇒ 三条入口同源。运行期：`MaterializeSelfTest` 新增第 9/10 组（4 项）——按槽位 / 按标签各做「外部必被拒」+「`MaterializingGuard` 激活必放行」正控，实测全绿（物化组 22 → **26 项**）。`MaterializingGuard` 为重入无死角：深度计数，见 `loadingGuardBlocks` 与正控用例 |
 | S-0.3-2 | 物化 512 条时的同步包体积与界面响应 | 🟠 高 | 实机压测；必要时下调 `maxMaterializedItems` 或改分页 |
 | S-0.3-4 | 网络合并时物化条目的清理时机（`mergeOtherNet` HEAD 是否早于 EMC 合并完成） | 🟠 高 | 双网络合并实测（沿用 S9 的方法） |
 | S-0.3-5 | `EMCRemapEvent` 时能否枚举到全部已加载网络（BD `NetRegistryIndex` 的可用时机） | 🟠 高 | 阶段 B 实测；退路：改为"玩家登录后 + 打开 GUI 时"刷新 |

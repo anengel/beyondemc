@@ -2,6 +2,35 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的结构。
 
+## [0.3.1] - 2026-10-01
+
+Minecraft 1.21.1 · NeoForge 21.1.249+ · 需要 Beyond Dimensions 0.7.30+ 与 ProjectE 1.1.0+ · JEI 19+ 可选。
+
+只含自检与文档，**不改任何游玩行为**。
+
+### 新增
+
+- **自检覆盖 BD 的三条抽取入口**（关闭 Spike S-0.3-7）。0.3.0 的自检只验了按*键*抽取，
+  没有覆盖按*槽位*与按*标签*抽取 —— 而"按标签抽"正是物化条目最隐蔽的零扣费路径
+  （`EmcItemKey.getTags()` 委托物品标签 ⇒ 物化条目会进 BD 的 `tag2stackMap`）。
+  新增 4 项断言，物化组自检 **22 → 26 项**：
+  - `按槽位抽取`：外部抽取被护栏拒绝（0 交付 / 0 扣费 / 条目不减）
+  - `按槽位抽取（正控）`：`MaterializingGuard` 激活时成功抽到 2（10 → 8），
+    **证明该入口确实命中物化条目**，排除"拦下了但其实没抽到"的假绿
+  - `按标签抽取`：外部抽取被护栏拒绝
+  - `按标签抽取（正控）`：`MaterializingGuard` 激活时成功抽到 3（10 → 7），证明标签确实解析到物化条目
+  静态依据：`UnifiedStorage.extract(int slot,…)` 与 `extract(TagKey,…)` 都委托到
+  `extract(IStackKey,…)`，钩子在同一条链路上。
+
+### 修正
+
+- **README 的 NeoForge 版本说明会导致实机启动失败**：原文三处写 `21.1.234+`，
+  但配套的 JEI `19.44.0.401` 自身要求 `NeoForge >= 21.1.238`，照 README 装 21.1.234 会在
+  模组加载阶段直接崩并报 `Mod jei requires neoforge 21.1.238 or above`。
+  已按实测环境改为 `21.1.249`，并写明最低 `21.1.238` 及其原因。
+- `docs/plan/ROADMAP-0.3.0.md` §9.4b：补「0.3.x 改崩 → 退回 `v0.3.0`」的回退步骤。
+- `docs/plan/RELEASE.md` §1 自检计数更新为 **54 项**（原 50 项）。
+
 ## [0.3.0] - 2026-10-01
 
 Minecraft 1.21.1 · NeoForge 21.1.249+ · 需要 Beyond Dimensions 0.7.30+ 与 ProjectE 1.1.0+ · JEI 19+ 可选。

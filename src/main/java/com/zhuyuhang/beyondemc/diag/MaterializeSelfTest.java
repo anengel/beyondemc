@@ -19,8 +19,10 @@ import io.netty.buffer.Unpooled;
 import moze_intel.projecte.api.ItemInfo;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
@@ -29,6 +31,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.LongSupplier;
 
 /**
  * 0.3.0 的诊断自检：验证"物化条目真实存在、可持久化、且不会被零扣费拿走"。
@@ -44,6 +47,15 @@ public final class MaterializeSelfTest {
     private MaterializeSelfTest() {
     }
 
+    /**
+     * 「按标签抽取」用例的候选物品：取第一个确实带有物品标签的。
+     *
+     * <p>尽量用钻石（与其他用例一致），但它是否带标签取决于数据包；后面三个是原版里
+     * 稳定带物品标签的兜底（橡木板 ∈ {@code minecraft:planks}、煤炭 ∈ {@code minecraft:coals}）。
+     */
+    private static final List<Item> TAG_CANDIDATES =
+            List.of(Items.DIAMOND, Items.OAK_PLANKS, Items.COAL, Items.IRON_INGOT);
+
     public static List<String> run(RegistryAccess registryAccess) {
         List<String> out = new ArrayList<>();
         int[] ok = {0};
@@ -56,6 +68,8 @@ public final class MaterializeSelfTest {
         storageWriteback(out, ok);
         loadingGuardBlocks(out, ok);
         zeroChargeGuard(out, ok);
+        slotExtractEntry(out, ok);
+        tagExtractEntry(out, ok);
 
         out.add("---- 物化（0.3.0）自检结果：" + ok[0] + " 项通过 ----");
         return out;
@@ -489,6 +503,155 @@ public final class MaterializeSelfTest {
             }
         } catch (Throwable t) {
             out.add("FAIL 零扣费护栏：" + t);
+        }
+    }
+
+    /**
+     * 9. 【S-0.3-7 之一】按<b>槽位</b>抽取（{@code extract(int slot,…)}）是否也经过改道钩子。
+     *
+     * <p>静态已核实：{@code UnifiedStorage.extract(int slot,…)} 在拿到钥匙后会调用
+     * {@code extract(stack.key(), …)}（{@code UnifiedStorage.java:110-114}），即与按键抽取<b>同一条</b>链路，
+     * 钩子在 122 行。本方法把这条静态推论变成运行期证据，并额外做一次「正控」——
+     * 证明该入口<b>确实</b>能命中物化条目，避免"拦下了，但那是因为压根没抽到"这种假绿。
+     */
+    private static void slotExtractEntry(List<String> out, int[] ok) {
+        ItemInfo diamond = ItemInfo.fromItem(Items.DIAMOND);
+        try {
+            DimensionsNet net = new DimensionsNet(true);
+            UnifiedStorage storage = net.getUnifiedStorage();
+            seed(net, diamond, 10L);
+            long emcBefore = NetEmcAccessor.getEmc(net);
+
+            final int slot = findSlot(storage, diamond);
+            if (slot < 0) {
+                out.add("FAIL 按槽位抽取：存储里找不到物化条目的槽位（该入口无法验证）");
+                return;
+            }
+
+            // (a) 外部（MaterializingGuard 未激活）→ 必须拒绝
+            KeyAmount denied = storage.extract(slot, 1L, false);
+            long leftAfterDeny = ItemMaterializer.currentEntries(net).getOrDefault(diamond, 0L);
+            if (denied.amount() == 0L && leftAfterDeny == 10L && NetEmcAccessor.getEmc(net) == emcBefore) {
+                out.add("OK   按槽位抽取（外部）：extract(slot=" + slot + ", 1) 被护栏拒绝 —— 0 交付、0 扣费、条目仍 10");
+                ok[0]++;
+            } else {
+                out.add("FAIL 按槽位抽取（外部）：delivered=" + denied.amount() + " 条目=" + leftAfterDeny
+                        + " EMC=" + NetEmcAccessor.getEmc(net) + "（期望 0 / 10 / 不变）");
+            }
+
+            // (b) 正控：物化层自用必须放行（否则上一条的"拒绝"可能是"没抽到"的假绿）
+            final int slot2 = findSlot(storage, diamond);
+            long got = slot2 < 0 ? -1L : extractAsMaterializer(() -> storage.extract(slot2, 2L, false).amount());
+            long leftAfterPositive = ItemMaterializer.currentEntries(net).getOrDefault(diamond, 0L);
+            if (got == 2L && leftAfterPositive == 8L) {
+                out.add("OK   按槽位抽取（正控）：MaterializingGuard 激活时成功抽到 2（10 → 8）—— 证明该入口确实命中物化条目");
+                ok[0]++;
+            } else {
+                out.add("FAIL 按槽位抽取（正控）：got=" + got + " 剩余=" + leftAfterPositive + "（期望 2 / 8）");
+            }
+        } catch (Throwable t) {
+            out.add("FAIL 按槽位抽取：" + t);
+        }
+    }
+
+    /**
+     * 10. 【S-0.3-7 之二】按<b>标签</b>抽取（{@code extract(TagKey,…)}）是否也经过改道钩子。
+     *
+     * <p>这是本 0.3 最隐蔽的一条缺口：因为 {@code EmcItemKey.getTags()} 委托物品标签，
+     * 物化条目会被登记进 BD 的 {@code tag2stackMap}，于是"按标签抽"也能命中它。
+     * 静态已核实 {@code UnifiedStorage.extract(TagKey,…)} 最终委托到同一条链路（{@code :136-142}）。
+     *
+     * <p>用例物品从 {@link #TAG_CANDIDATES} 里挑第一个"确实带有物品标签"的；
+     * 都带不上就报 SKIP（如实说明未覆盖，不伪装成通过）。
+     */
+    private static void tagExtractEntry(List<String> out, int[] ok) {
+        ItemInfo target = null;
+        TagKey<Item> tag = null;
+        for (Item item : TAG_CANDIDATES) {
+            TagKey<Item> t = firstItemTag(ItemInfo.fromItem(item));
+            if (t != null) {
+                target = ItemInfo.fromItem(item);
+                tag = t;
+                break;
+            }
+        }
+        if (target == null) {
+            out.add("SKIP 按标签抽取：候选物品（钻石 / 橡木板 / 煤炭 / 铁锭）在当前环境都没有物品标签，无法构造用例");
+            return;
+        }
+        final ItemInfo t0 = target;
+        final TagKey<Item> tk = tag;
+        try {
+            DimensionsNet net = new DimensionsNet(true);
+            UnifiedStorage storage = net.getUnifiedStorage();
+            seed(net, t0, 10L);
+            long emcBefore = NetEmcAccessor.getEmc(net);
+
+            // (a) 外部 → 必须拒绝
+            KeyAmount denied = storage.extract(tk, 1L, false);
+            long leftAfterDeny = ItemMaterializer.currentEntries(net).getOrDefault(t0, 0L);
+            if (denied.amount() == 0L && leftAfterDeny == 10L && NetEmcAccessor.getEmc(net) == emcBefore) {
+                out.add("OK   按标签抽取（外部）：extract(" + tk.location() + ", 1) 被护栏拒绝 —— 0 交付、0 扣费、条目仍 10");
+                ok[0]++;
+            } else {
+                out.add("FAIL 按标签抽取（外部）：delivered=" + denied.amount() + " 条目=" + leftAfterDeny
+                        + " EMC=" + NetEmcAccessor.getEmc(net) + "（期望 0 / 10 / 不变）");
+            }
+
+            // (b) 正控：物化层自用必须放行
+            long got = extractAsMaterializer(() -> storage.extract(tk, 3L, false).amount());
+            long leftAfterPositive = ItemMaterializer.currentEntries(net).getOrDefault(t0, 0L);
+            if (got == 3L && leftAfterPositive == 7L) {
+                out.add("OK   按标签抽取（正控）：MaterializingGuard 激活时成功抽到 3（10 → 7）—— 证明标签确实解析到物化条目");
+                ok[0]++;
+            } else {
+                out.add("FAIL 按标签抽取（正控）：got=" + got + " 剩余=" + leftAfterPositive + "（期望 3 / 7）");
+            }
+        } catch (Throwable t) {
+            out.add("FAIL 按标签抽取：" + t);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 测试辅助
+    // ------------------------------------------------------------------
+
+    /** 直连"权威数据算出的期望值"注入一批物化条目（跳过 EMC 表，专注验证存储与抽取链路）。 */
+    private static void seed(DimensionsNet net, ItemInfo info, long amount) {
+        Map<ItemInfo, Long> seeded = new LinkedHashMap<>();
+        seeded.put(info, amount);
+        ItemMaterializer.applyWant(net, seeded);
+    }
+
+    /** 在存储里定位该物化条目的槽位下标；找不到返回 -1。 */
+    private static int findSlot(UnifiedStorage storage, ItemInfo info) {
+        int size = storage.getStorage().size();
+        for (int i = 0; i < size; i++) {
+            KeyAmount ka = storage.getStackBySlot(i);
+            if (ka.key() instanceof EmcItemKey k && k.info().equals(info)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 取该物品第一个「物品」标签；没有标签时返回 {@code null}。 */
+    @SuppressWarnings("unchecked")
+    private static TagKey<Item> firstItemTag(ItemInfo info) {
+        return new EmcItemKey(info).getTags()
+                .filter(t -> t.isFor(Registries.ITEM))
+                .map(t -> (TagKey<Item>) t)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** 在 {@link MaterializingGuard} 激活状态下执行一次抽取（即"物化层自己在维护自己的条目"这一场景）。 */
+    private static long extractAsMaterializer(LongSupplier action) {
+        MaterializingGuard.enter();
+        try {
+            return action.getAsLong();
+        } finally {
+            MaterializingGuard.exit();
         }
     }
 }
