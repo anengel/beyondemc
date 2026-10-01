@@ -5,6 +5,7 @@
    pwsh -NoProfile -ExecutionPolicy Bypass -File tools\install-to-mods.ps1
    pwsh ... -File tools\install-to-mods.ps1 -ModsPath "D:\某实例\mods"
    pwsh ... -File tools\install-to-mods.ps1 -Yes        # 跳过确认
+   pwsh ... -File tools\install-to-mods.ps1 -ListOnly   # 只列出候选 mods 目录，不改任何文件
 
  它会做三件事：
    1. 找到 build\libs 下最新构建出来的 beyondemc jar
@@ -18,7 +19,8 @@
 
 param(
     [string]$ModsPath,
-    [switch]$Yes
+    [switch]$Yes,
+    [switch]$ListOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,6 +80,19 @@ if ($prereqs.Count -lt 2) {
 }
 
 # ---------------------------------------------------------------- 3. 确定目标目录
+#
+# 为什么要看 jar 而不只看版本目录名：
+#   整合包实例常把版本目录改名（例如 "你好，新蒸程！V1.7.5正式版"），名字里既没有
+#   "1.21.1" 也没有 "NeoForge"。只按名字匹配会**漏掉真正的目标**，然后因为"只找到 1 个
+#   候选"而静默装进另一个空实例 —— 装完游戏里看不到模组，白白浪费时间。
+#   所以两个判据取并集：名字匹配 **或** 该 mods 目录里已经有本模组/任一前置模组。
+function Get-OurJars($modsPath) {
+    if (-not (Test-Path $modsPath)) { return @() }
+    return @(Get-ChildItem -LiteralPath $modsPath -Filter '*.jar' -File -ErrorAction SilentlyContinue |
+             Where-Object { $_.Name -match 'beyondemc|beyonddimensions|projecte' } |
+             ForEach-Object { $_.Name })
+}
+
 function Get-Candidates {
     $roots = @(
         (Join-Path $env:APPDATA '.minecraft'),
@@ -94,11 +109,23 @@ function Get-Candidates {
         if (Test-Path $versions) {
             Get-ChildItem -LiteralPath $versions -Directory -ErrorAction SilentlyContinue | ForEach-Object {
                 $verName = $_.Name
-                if ($verName -match '1\.21\.1' -and $verName -match 'NeoForge') {
+                $mods = Join-Path $_.FullName 'mods'
+                $byName = ($verName -match '1\.21\.1' -and $verName -match 'NeoForge')
+                $jars = Get-OurJars $mods
+                $byJar = ($jars.Count -gt 0)
+                if ($byName -or $byJar) {
+                    if ($byJar) {
+                        # 直接把命中的 jar 列出来：多个实例往往都装着同一个旧版本
+                        # （比如 0.2.0），只写"已装本模组"根本分不清该选哪个。
+                        $why = '已装: ' + ($jars -join ' | ')
+                    } else {
+                        $why = '版本名含 1.21.1 + NeoForge，但 mods 里没有本模组/前置'
+                    }
                     $found += [pscustomobject]@{
-                        Mods    = (Join-Path $_.FullName 'mods')
+                        Mods    = $mods
                         Version = $verName
                         Root    = $root
+                        Why     = $why
                     }
                 }
             }
@@ -106,15 +133,54 @@ function Get-Candidates {
         # 直接就是 mods 的布局
         $direct = Join-Path $root 'mods'
         if (Test-Path $direct) {
-            $found += [pscustomobject]@{ Mods = $direct; Version = '(游戏目录直属 mods)'; Root = $root }
+            $found += [pscustomobject]@{
+                Mods    = $direct
+                Version = '(游戏目录直属 mods)'
+                Root    = $root
+                Why     = '游戏目录本身就是实例目录'
+            }
         }
     }
-    return $found
+    # 去重（同一个 mods 路径可能被两条规则同时命中）
+    $seen = @{}
+    $uniq = @()
+    foreach ($c in $found) {
+        $k = $c.Mods.ToLowerInvariant()
+        if (-not $seen.ContainsKey($k)) { $seen[$k] = $true; $uniq += $c }
+    }
+    return $uniq
 }
 
 $target = $ModsPath
+if ($ListOnly -and $target) {
+    # 显式给了路径又要 ListOnly —— 按 ListOnly 的字面承诺，只报不改。
+    Info ""
+    Info ("指定目标: {0}" -f $target)
+    $j = Get-OurJars $target
+    if ($j.Count -gt 0) { Info ('      已装: ' + ($j -join ' | ')) }
+    else                { Info '      该目录为空，或没有本模组/前置。' }
+    Info ""
+    Info "-ListOnly：仅列出候选，未改动任何文件。"
+    exit 0
+}
 if (-not $target) {
     $cands = @(Get-Candidates)
+
+    # -ListOnly：无论找到几个候选，都只打印、绝不改任何文件就退出。
+    # （早先的写法在"恰好 1 个候选"时会直接往下走到复制那一步，属于隐性越权。）
+    if ($ListOnly) {
+        if ($cands.Count -eq 0) { Warn "没有找到任何候选 mods 目录。"; exit 0 }
+        Info ""
+        Info ("共 {0} 个候选：" -f $cands.Count)
+        for ($i = 0; $i -lt $cands.Count; $i++) {
+            Info ("  [{0}] {1}" -f ($i + 1), $cands[$i].Mods)
+            Info ("      {0}" -f $cands[$i].Why)
+        }
+        Info ""
+        Info "-ListOnly：仅列出候选，未改动任何文件。"
+        exit 0
+    }
+
     if ($cands.Count -eq 0) {
         Warn "没能自动找到 1.21.1 + NeoForge 的 mods 目录。"
         $target = Read-Host "请手动输入 mods 目录的完整路径"
@@ -122,6 +188,7 @@ if (-not $target) {
     elseif ($cands.Count -eq 1) {
         Info ""
         Info ("找到候选: {0}" -f $cands[0].Mods)
+        Info ("          （{0}）" -f $cands[0].Why)
         $target = $cands[0].Mods
     }
     else {
@@ -129,6 +196,7 @@ if (-not $target) {
         Info "找到多个候选，请选择："
         for ($i = 0; $i -lt $cands.Count; $i++) {
             Info ("  [{0}] {1}" -f ($i + 1), $cands[$i].Mods)
+            Info ("      {0}" -f $cands[$i].Why)
         }
         $sel = Read-Host "输入序号（默认 1）"
         if (-not $sel) { $sel = '1' }
