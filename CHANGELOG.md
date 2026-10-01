@@ -4,7 +4,7 @@
 
 ## [0.3.2] - 2026-10-01
 
-对应 tag `v0.3.2` → `0d79f9d`。本节分两部分：
+对应 tag `v0.3.2`（指向本节所在的发布准备提交）。本节分两部分：
 **Create 集成与「第三方可见化」（改了 `src/`，已实机验收）** 与 **更早一轮的工具修复（只碰 `tools/`）**。
 面向用户的发布说明见 `docs/release-notes-v0.3.2.md`；设计取舍见 `docs/plan/CREATE-INTEGRATION.md`。
 
@@ -85,7 +85,7 @@
 > - 仍未覆盖：多人并发、在 AE2/RS 等具体物流模组上的取用实跑、10 万件量级性能。
 
 > **发布产物**：`beyondemc-1.21.1-neoforge-0.3.2.jar`（190,995 字节）；
-> 备份 `backups/beyondemc-0.3.2.{bundle,source.zip,jar}`；真克隆演练通过（28 提交、5 tag、114 跟踪文件）。
+> 备份 `backups/beyondemc-0.3.2.{bundle,source.zip,jar}`；真克隆演练通过（**5 个 tag 全部 peel 正确**、115 跟踪文件、工作树干净）。
 
 ### 修正 —— 工具（只碰 `tools/`）
 

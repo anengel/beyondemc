@@ -9,7 +9,7 @@
 | 模组名 | Beyond EMC |
 | mod id | `beyondemc` |
 | 包名 | `com.zhuyuhang.beyondemc` |
-| 版本 | `0.3.2`（开发中；最近发布为 `0.3.1`，tag `v0.3.1` → `2e5b8e3`） |
+| 版本 | `0.3.2`（**当前发布**，tag `v0.3.2` → 发布准备提交；上一个发布 `0.3.1`，tag `v0.3.1` → `2e5b8e3`） |
 | 作者 | ZhuYuhang |
 | 许可证 | MIT（与两个前置模组一致；`LICENSE` 已放入工程根，构建时打进 jar 的 `META-INF`） |
 | Minecraft | `1.21.1` |
@@ -133,4 +133,4 @@ dependencies {
 | 2026-09-27 | 加入模组图标 `src/main/resources/beyondemc.png`（256×256），并在 `mods.toml` 里配 `logoFile` | 无 API 影响 |
 | 2026-10-01 | 0.3.0 发布（物化：物品真实存在于维度网络） → 版本 `0.3.0`，tag `v0.3.0` → `e1d0958` | 新增自定义键类型 `EmcItemKey` / `EmcItemType` |
 | 2026-10-01 | 0.3.1 发布（自检覆盖 BD 三条抽取入口，关闭 Spike `S-0.3-7`） → 版本 `0.3.1`，tag `v0.3.1` → `2e5b8e3` | 不改游玩行为；`mod_version` = `0.3.1` |
-| 2026-10-01 | 0.3.2：Create（机械动力）集成与「第三方可见化」 → 版本 `0.3.2` | 新增 `-PwithCreate` 可选依赖接线、`create_version` 属性、`beyondemc.create.mixins.json`；Mixin `ItemUnifiedStorageHandler`（无序能力桥，**有序版刻意不动**）。详见 `docs/plan/CREATE-INTEGRATION.md` |
+| 2026-10-01 | 0.3.2 发布（Create 集成与「第三方可见化」） → 版本 `0.3.2`，tag `v0.3.2` 指向发布准备提交 | 新增 `-PwithCreate` 可选依赖接线、`create_version` 属性、`beyondemc.create.mixins.json`；Mixin `ItemUnifiedStorageHandler`（无序能力桥，**有序版刻意不动**）。详见 `docs/plan/CREATE-INTEGRATION.md` |
