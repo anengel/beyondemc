@@ -205,7 +205,14 @@ public abstract class ItemUnifiedStorageHandlerMixin {
         }
     }
 
-    /** 某个物化槽的展示栈（数量夹在 [1, 原版堆叠数]）；不可交付则为空栈。 */
+    /**
+     * 某个物化槽的展示栈；不可交付则为空栈。
+     *
+     * <p><b>数量不按堆叠数夹取</b>（0.3.2 第二轮实测缺陷）：BD 原生的
+     * {@code getStackInSlot} 对真实库存返回 {@code clampLongToInt(全量)}——
+     * 300 万就报 300 万。这里与之对齐，否则"真实库存"与"物化条目"两条行
+     * 对同一个网络会报出不同的数量口径。
+     */
     @Unique
     private ItemStack beyondemc$materializedDisplay(int raw) {
         try {

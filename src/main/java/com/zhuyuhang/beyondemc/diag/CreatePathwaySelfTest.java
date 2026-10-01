@@ -184,27 +184,37 @@ public final class CreatePathwaySelfTest {
     }
 
     /**
-     * 3. 展示栈的数量必须夹在 {@code [1, 原版堆叠数]}。
+     * 3. 展示栈的数量约定：<b>全量（只按 int 夹取），不按堆叠数夹取</b>。
+     *
+     * <p>0.3.2 第二轮实测缺陷的回归：夹到堆叠数（64）会让 Create 的材料清单
+     * （{@code gathered} 累加 {@code getStackInSlot().getCount()}）对任何需求量
+     * 超过一组的材料永远显示"还缺"（蓝图接口每物品只有一个槽）。BD 原生对真实库存
+     * 也返回全量，这里必须同口径。
      */
     private static void displayStackClamping(List<String> out, int[] ok) {
         try {
             ItemInfo diamond = ItemInfo.fromItem(Items.DIAMOND);
-            int max = new ItemStack(Items.DIAMOND).getMaxStackSize(); // 64
 
             ItemStack huge = MaterializeQuote.displayStack(diamond, 1_000_000L);
             ItemStack one = MaterializeQuote.displayStack(diamond, 1L);
             ItemStack none = MaterializeQuote.displayStack(diamond, 0L);
             ItemStack neg = MaterializeQuote.displayStack(diamond, -1L);
+            ItemStack overflow = MaterializeQuote.displayStack(diamond, Long.MAX_VALUE);
+            ItemStack maxInt = MaterializeQuote.displayStack(diamond, (long) Integer.MAX_VALUE + 5L);
 
-            boolean pass = !huge.isEmpty() && huge.getCount() == max
+            boolean pass = !huge.isEmpty() && huge.getCount() == 1_000_000
                     && !one.isEmpty() && one.getCount() == 1
+                    && !overflow.isEmpty() && overflow.getCount() == Integer.MAX_VALUE
+                    && !maxInt.isEmpty() && maxInt.getCount() == Integer.MAX_VALUE
                     && none.isEmpty() && neg.isEmpty();
             if (pass) {
                 ok[0]++;
-                out.add("OK   展示栈夹取：1,000,000 → " + max + "；1 → 1；0 / 负数 → 空栈");
+                out.add("OK   展示栈数量约定：1,000,000 → 1,000,000（全量，不按堆叠数夹）；"
+                        + "1 → 1；超 int → Integer.MAX_VALUE；0 / 负数 → 空栈");
             } else {
-                out.add("FAIL 展示栈夹取：huge=" + huge.getCount() + "（期望 " + max + "）one="
-                        + one.getCount() + " none.isEmpty=" + none.isEmpty()
+                out.add("FAIL 展示栈数量约定：huge=" + huge.getCount() + "（期望 1,000,000）one="
+                        + one.getCount() + " overflow=" + overflow.getCount()
+                        + "（期望 " + Integer.MAX_VALUE + "）none.isEmpty=" + none.isEmpty()
                         + " neg.isEmpty=" + neg.isEmpty());
             }
         } catch (Throwable t) {

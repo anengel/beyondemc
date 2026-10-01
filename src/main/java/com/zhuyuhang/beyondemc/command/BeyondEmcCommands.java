@@ -8,6 +8,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet;
 import com.zhuyuhang.beyondemc.config.BeyondEmcConfig;
 import com.zhuyuhang.beyondemc.core.EmcAvailability;
+import com.zhuyuhang.beyondemc.diag.CannonDump;
 import com.zhuyuhang.beyondemc.diag.EmcStorageSelfTest;
 import com.zhuyuhang.beyondemc.diag.MaterializeSelfTest;
 import com.zhuyuhang.beyondemc.diag.Phase3SelfTest;
@@ -25,6 +26,7 @@ import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.item.ItemArgument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -71,7 +73,12 @@ public final class BeyondEmcCommands {
                         .then(Commands.literal("clear").executes(BeyondEmcCommands::materializeClear)))
                 .then(Commands.literal("why")
                         .then(Commands.argument("item", ItemArgument.item(buildContext))
-                                .executes(BeyondEmcCommands::why))));
+                                .executes(BeyondEmcCommands::why)))
+                .then(Commands.literal("cannon")
+                        .then(Commands.argument("x", IntegerArgumentType.integer())
+                                .then(Commands.argument("y", IntegerArgumentType.integer())
+                                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                .executes(BeyondEmcCommands::cannon))))));
     }
 
     // ------------------------------------------------------------------
@@ -385,6 +392,23 @@ public final class BeyondEmcCommands {
         source.sendFailure(Component.literal("[BeyondEMC] 结论：第三方会报「无库存」。"
                 + "上面 ②③④⑤ 里第一条不成立的就是原因；若全绿，请用 /beyondemc materialize list 对照应然条目"));
         return 0;
+    }
+
+    /**
+     * {@code /beyondemc cannon <x> <y> <z>} —— 无头复现蓝图大炮材料清单的完整判定链。
+     *
+     * <p>把 <b>Create / BD / 本模组</b> 三层对同一个大炮的判定全部打出来：
+     * required 与 gathered 的逐项对照（即打印清单的"满足/还缺"口径）、
+     * 蓝图接口每个槽位的 {@code getStackInSlot} 与 {@code extractItem(1, true)} 两条判据。
+     * 详见 {@link CannonDump} 的类注释。
+     *
+     * <p><b>控制台可用</b>（配合 RCON / forceload 即可在无玩家环境复现实机报告）。
+     */
+    private static int cannon(CommandContext<CommandSourceStack> ctx) {
+        int x = IntegerArgumentType.getInteger(ctx, "x");
+        int y = IntegerArgumentType.getInteger(ctx, "y");
+        int z = IntegerArgumentType.getInteger(ctx, "z");
+        return CannonDump.dump(ctx.getSource(), new BlockPos(x, y, z));
     }
 
     /**

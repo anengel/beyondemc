@@ -68,6 +68,17 @@ import java.util.List;
  * <p>现在改为统一走 {@link MaterializeQuote#externalDeliverable}，
  * 显示与模拟抽取共用同一入口，不再看条目。
  *
+ * <h2>⚠️ 0.3.2 第二轮实测缺陷：显示量绝不能按堆叠数（64）夹取</h2>
+ * 存档实证（2026-10-01 同一份网络）：清单里圆石满足（58 需求 &lt; 64）、传动杆不满足
+ * （125 需求 &gt; 64），尽管两者都已学习、都有价、余额都买得起十几万个。
+ * 根因：{@code updateChecklist} 拿 {@code getStackInSlot(i).getCount()} 累加
+ * {@code gathered}；蓝图接口<b>每个物品只有一个槽</b>，显示栈夹到 64 就意味着
+ * {@code gathered} 封顶 64 —— 需求超过一组的材料永远"还缺"。
+ * （传动杆的 125 = 2 根明杆 + 123 根"带壳传动链驱动/带壳传动杆"的组装需求，
+ * Create 对这些方块的 {@code ItemRequirement} 会额外要传动杆。）
+ * 修法：{@code getStackInSlot} 与 BD 原生语义对齐——返回<b>全量</b>
+ * （BD 原生 {@code copyStackWithCount(ka.amount())} 同样不夹）。
+ *
  * <p>另：{@code getSlots()} <b>刻意不注入</b> —— {@code allSchematicannonItems} 快照
  * 本来就包含 checklist 里的全部物品（不看网络有没有），槽位数已经覆盖，无需改动。
  *
@@ -140,7 +151,8 @@ public abstract class NetedSchematicannonItemHandlerMixin {
             if (give <= 0L) {
                 return; // 策略层不允许（未学习 / 无价 / 余额不足 / 被存入侧筛选排除）→ 报"没料"
             }
-            // 数量夹在 [1, 原版堆叠数]：物化量可能有上百万，直接塞进 ItemStack 会越界/显示错乱
+            // 数量 = min(请求量, 余额可负担份数)：extractItem 语义是"最多给 count 个"，
+            // 不按堆叠数夹取（BD 原生 extractItem 同样返回 extract 出的全量）
             ItemStack out = MaterializeQuote.displayStack(resolved.info(), give);
             if (!out.isEmpty()) {
                 cir.setReturnValue(out);
@@ -155,9 +167,15 @@ public abstract class NetedSchematicannonItemHandlerMixin {
      *
      * <p>数量用 {@link MaterializeQuote#externalDeliverable}（"最多能取多少"）而不是物化条目量：
      * 显示与模拟抽取必须同源，否则会出现类注释所述的那种自相矛盾
-     * （抽取说有料、显示却一直是 0，或反之）。返回值再被 {@link MaterializeQuote#displayStack}
-     * 夹到 {@code [1, 原版堆叠数]} —— 物化量可能有上百万，直接把 {@code int} 数量交给第三方容器
-     * 会引发越界与显示错乱。
+     * （抽取说有料、显示却一直是 0，或反之）。
+     *
+     * <p><b>数量不按堆叠数夹取</b>（0.3.2 第二轮实测缺陷）：BD 原生的
+     * {@code getStackInSlot} 对真实库存返回 {@code copyStackWithCount(全量)}——
+     * 300 万就报 300 万；而 Create 的 {@code updateChecklist} 正是拿
+     * {@code getStackInSlot(i).getCount()} 去累加 {@code gathered}、再按
+     * {@code required − gathered} 判"满足/还缺"。蓝图接口<b>每个物品只有一个槽</b>
+     * （{@code stacksSnapshot} 按物品去重），一旦夹到堆叠数（64），任何需求量
+     * 超过一组的材料就永远"还缺"——实测传动杆 64/125，网络明明买得起 13 万个。
      */
     @Unique
     private ItemStack beyondemc$materializedStack(int slot) {
@@ -176,7 +194,7 @@ public abstract class NetedSchematicannonItemHandlerMixin {
             if (resolved == null) {
                 return ItemStack.EMPTY;
             }
-            // want = 不限（要的就是"一共有多少可用"），由 displayStack 负责夹到堆叠上限
+            // want = 不限（要的就是"一共有多少可用"），返回全量（见 displayStack 的数量约定）
             long amount = MaterializeQuote.externalDeliverable(this.net, resolved.info(), Long.MAX_VALUE);
             if (amount <= 0L) {
                 return ItemStack.EMPTY;

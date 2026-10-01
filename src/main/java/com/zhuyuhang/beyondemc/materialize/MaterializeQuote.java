@@ -194,11 +194,29 @@ public final class MaterializeQuote {
     /**
      * 「展示栈」的构造收口：把物化条目的身份 + 数量变成可以交给第三方容器的 {@link ItemStack}。
      *
-     * <p><b>数量必须夹在 {@code [1, 原版堆叠数]}</b>：物化条目量可能有上百万，
-     * 而 {@code IItemHandler} 的调用方（Create 的判定循环、各种自动化模组）会把它当
-     * 真实堆叠数使用 —— 直接塞一个七位数进去会引发显示错乱与越界。
+     * <p><b>数量只按 int 范围夹取，不按原版堆叠数夹取</b>（0.3.2 第二轮实测缺陷的教训）。
+     * 两个理由：
+     * <ol>
+     *   <li><b>与 BD 的原生语义对齐</b>：两个暴露路径（蓝图大炮的
+     *       {@code NetedSchematicannonItemHandler}、通用物品能力桥的
+     *       {@code ItemUnifiedStorageHandler}）里 BD 原生的 {@code getStackInSlot}
+     *       都返回<b>全量</b>（{@code copyStackWithCount(ka.amount())} /
+     *       {@code clampLongToInt(...)}）——真实库存 300 万就报 300 万，从不夹到 64。
+     *       我们若夹到 64，就成了"同样的网络、真实库存和物化条目报的数量口径不同"。</li>
+     *   <li><b>Create 的清单会计按数量累加</b>：{@code updateChecklist} 把
+     *       {@code getStackInSlot(i).getCount()} 累加进 {@code gathered}，材料清单按
+     *       {@code required − gathered} 判"满足/还缺"。蓝图接口<b>每个物品只有一个槽</b>，
+     *       夹到 64 就意味着 {@code gathered} 永远 ≤ 64 —— 任何需求量超过一组的材料
+     *       （实测：蓝图里 {@code create:shaft} 需要 125 个）都会<b>永远显示"还缺"</b>，
+     *       无论网络 EMC 买得起多少。存档实证（2026-10-01）：圆石 64/58 满足、
+     *       传动杆 64/125 不满足 —— 尽管两者都有充足的物化条目与余额。</li>
+     * </ol>
      *
-     * @return 失败（身份取不出物品）时返回 {@link ItemStack#EMPTY}
+     * <p>大数量对调用方是安全的：{@code extractItem} 的真实交付仍逐次按请求量走
+     * 扣费铸造链（不会一次交出一百万个），Create 的抽取循环也只按
+     * {@code getMaxStackSize()} 分批取。
+     *
+     * @return 失败（身份取不出物品 / 数量 ≤ 0）时返回 {@link ItemStack#EMPTY}
      */
     public static @NotNull ItemStack displayStack(@NotNull ItemInfo info, long amount) {
         if (amount <= 0L) {
@@ -209,7 +227,8 @@ public final class MaterializeQuote {
             if (out.isEmpty()) {
                 return ItemStack.EMPTY;
             }
-            out.setCount((int) Math.max(1L, Math.min(amount, (long) out.getMaxStackSize())));
+            // 与 BD 的 BDMath.clampLongToInt 同语义：只防 int 溢出，不按堆叠数夹
+            out.setCount((int) Math.min(amount, (long) Integer.MAX_VALUE));
             return out;
         } catch (Throwable t) {
             return ItemStack.EMPTY;
