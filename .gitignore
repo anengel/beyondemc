@@ -40,3 +40,6 @@ out/
 # 本地备份（含发布 jar 与前置模组二进制，体积大且不该进仓库）
 # 内容与还原步骤见 backups/README.md
 backups/
+
+# WorkBuddy 的工具状态与工作记忆（非项目产物）
+.workbuddy/
