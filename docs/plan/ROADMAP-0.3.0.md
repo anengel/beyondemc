@@ -459,8 +459,8 @@ tools\gradlew-here.cmd build       # 重新出 jar
 | `backups/beyondemc-0.3-baseline.bundle` | ✅ **本轮新建** | 演练：HEAD `d30cbff`、15 提交、93 文件、工作树干净 |
 | `backups/beyondemc-0.3-baseline-source.zip` | ✅ **本轮新建** | SHA-256 `72e2b7a7…` |
 | tag `v0.3.0`（附注 tag → `e1d0958`） | ✅ **本轮新建** | `git rev-parse 'v0.3.0^{commit}'` = `e1d0958` |
-| `backups/beyondemc-0.3.0.bundle` | ✅ **本轮新建** | 演练：HEAD `e1d0958`、16 提交、三个 tag 全在、102 文件、工作树干净（真克隆到临时目录跑完再删） |
-| `backups/beyondemc-0.3.0-source.zip` | ✅ **本轮新建** | SHA-256 `44200F05…` |
+| `backups/beyondemc-0.3.0.bundle` | ✅ **本轮新建**（每次提交后**重跑演练**） | 演练（临时克隆自该 bundle）：3 个 tag 全在、`v0.3.0` → `e1d0958`、102 跟踪文件、工作树干净；跑完删掉克隆目录 |
+| `backups/beyondemc-0.3.0-source.zip` | ✅ **本轮新建** | SHA-256 `15F78EED…` |
 | `backups/beyondemc-1.21.1-neoforge-0.3.0.jar` | ✅ **本轮新建** | SHA-256 `C235AC96…` |
 | `backups/本地开发环境参考手册.md` | ✅ **本轮新建** | 手工复制（该文件未跟踪，bundle/archive 拿不到）；SHA-256 `d476b6e4…` |
 
