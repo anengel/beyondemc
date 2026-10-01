@@ -186,9 +186,21 @@ OK   Mixin 目标存活性：核对了 6 个目标，全部存在（4 个客户�
       已存在 jar（按 `modId` 判、不只看文件名，因此整合包那份加了中文前缀的异名 jar 也能识别），
       并拒绝在结果目录里留下同一 `modId` 的两份。回归测试：`tools/test-install-to-mods.ps1`
 - [x] **备份已重建并演练**：`backups/beyondemc-0.3.2.{bundle,source.zip,jar}`；
-      真克隆核验 HEAD `0d79f9d`、28 提交、**5 个 tag 全部 peel 正确**、114 跟踪文件、工作树干净
-- [ ] **本地 tag `v0.3.2` 已打**（→ `0d79f9d`），**尚未 push** —— 推送由使用者执行
-      （`git push origin main && git push origin --tags`）
+      从 bundle 真克隆核验 **5 个 tag 全部 peel 正确**、`v0.3.2` 指向发布准备提交、
+      跟踪文件数一致（精确 HEAD 与提交数记在 `backups/README.md`，该文件在 tag 之外）
+- [x] **`v0.3.2` 已重新指向发布准备提交**（原指向 `0d79f9d` 是**打早了**：该提交的
+      `CHANGELOG.md` 还写着 `## [未发布]`，树内也没有 `docs/release-notes-v0.3.2.md`。
+      `v0.3.1` 及更早的 tag 树内 CHANGELOG 首标题都是**自己的版本号**，即以「发布准备完成后」
+      为 tag 落点；0.3.2 首次违反。已 `git tag -d` 后按原注释重打，落点为发布准备提交。
+      **tag 从未推送，重打无副作用**）
+- [ ] **本地 tag `v0.3.2` 尚未 push** —— 推送由使用者执行：
+      ```bash
+      git push origin main          # 远端 main 停在 38bcfb7，本地领先 4 个提交
+      git push origin v0.3.2        # 远端已有 v0.1.0~v0.3.1，只缺 v0.3.2
+      ```
+      （不要用 `git push origin --tags`：它会顺带尝试推 `v0.3.0` / `v0.3.1`，而这两个已发布的
+      tag 树内同样缺各自的 `docs/release-notes-v0.3.x.md`。它们已推送、不能在不 force push
+      的前提下修正，保持原样即可；只推 `v0.3.2` 可避免任何歧义。）
 - [ ] GitHub Release：选 tag `v0.3.2`，正文粘 `docs/release-notes-v0.3.2.md`，
       附件传 `backups/beyondemc-1.21.1-neoforge-0.3.2.jar`
 
