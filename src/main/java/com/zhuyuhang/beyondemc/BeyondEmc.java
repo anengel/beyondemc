@@ -137,6 +137,11 @@ public class BeyondEmc {
             return;
         }
 
+        // 0.3.0：打开界面前先重算一次物化条目。
+        // 这是"读档后修复"的兜底路径（Spike S-0.3-5）：EMC 表就绪后，只要玩家打开界面，
+        // 物化条目就一定与当前 EMC 一致 —— 不依赖 EMCRemapEvent 时能否枚举到全部网络。
+        com.zhuyuhang.beyondemc.materialize.ItemMaterializer.refresh(net);
+
         // 单价在服务端算好随包下发：客户端不该依赖自己那份 EMC 价格表
         // （它可能是空的或过期的，而那种失败会表现成"界面里什么都看不到"）
         List<KnowledgeSyncPacket.LearnedEntry> learned = new ArrayList<>();
@@ -154,9 +159,25 @@ public class BeyondEmc {
             learned.add(new KnowledgeSyncPacket.LearnedEntry(info, unitPrice));
         }
 
-        PacketDistributor.sendToPlayer(player, new KnowledgeSyncPacket(net.getId(), learned));
-        LOGGER.info("[BeyondEMC] 已向 {} 同步网络 {} 的 {} 项已学习物品（其中 {} 项当前无 EMC 价值）",
-                player.getGameProfile().getName(), net.getId(), learned.size(), noPrice);
+        PacketDistributor.sendToPlayer(player, new KnowledgeSyncPacket(
+                net.getId(), learned, isMaterializeActive()));
+        LOGGER.info("[BeyondEMC] 已向 {} 同步网络 {} 的 {} 项已学习物品（其中 {} 项当前无 EMC 价值；服务端物化={}）",
+                player.getGameProfile().getName(), net.getId(), learned.size(), noPrice, isMaterializeActive());
+    }
+
+    /**
+     * 服务端物化是否正在生效。
+     *
+     * <p>随 {@code KnowledgeSyncPacket} 下发给客户端，让客户端在物化生效时<b>不再注入虚拟条目</b>
+     * —— 那些物品已经是服务端真实的 {@code EmcItemKey} 条目，再注入会出两行。
+     */
+    private static boolean isMaterializeActive() {
+        try {
+            return BeyondEmcConfig.materializeItems()
+                    && BeyondEmcConfig.materializeMode() == BeyondEmcConfig.MaterializeMode.STORAGE;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** 关闭界面时清掉客户端缓存，避免把上一个网络的学习集合用到下一个网络上。 */
@@ -188,6 +209,10 @@ public class BeyondEmc {
         }
         LOGGER.info("[BeyondEMC] ---- 兑换服务（阶段 4）----");
         for (String line : Phase4SelfTest.run()) {
+            LOGGER.info("[BeyondEMC] {}", line);
+        }
+        LOGGER.info("[BeyondEMC] ---- 物化：物品真实存在于网络中（0.3.0）----");
+        for (String line : com.zhuyuhang.beyondemc.diag.MaterializeSelfTest.run(event.getServer().registryAccess())) {
             LOGGER.info("[BeyondEMC] {}", line);
         }
         LOGGER.info("[BeyondEMC] ---- 策略与配置（阶段 6）----");

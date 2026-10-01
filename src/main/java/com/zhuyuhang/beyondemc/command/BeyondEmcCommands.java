@@ -8,6 +8,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet;
 import com.zhuyuhang.beyondemc.core.EmcAvailability;
 import com.zhuyuhang.beyondemc.diag.EmcStorageSelfTest;
+import com.zhuyuhang.beyondemc.diag.MaterializeSelfTest;
 import com.zhuyuhang.beyondemc.diag.Phase3SelfTest;
 import com.zhuyuhang.beyondemc.diag.Phase4SelfTest;
 import com.zhuyuhang.beyondemc.emc.EmcDepositHandler;
@@ -15,6 +16,7 @@ import com.zhuyuhang.beyondemc.emc.EmcStackKey;
 import com.zhuyuhang.beyondemc.emc.NetEmcAccessor;
 import com.zhuyuhang.beyondemc.exchange.ExchangeService;
 import com.zhuyuhang.beyondemc.knowledge.NetKnowledgeStore;
+import com.zhuyuhang.beyondemc.materialize.ItemMaterializer;
 import moze_intel.projecte.api.ItemInfo;
 import moze_intel.projecte.api.proxy.IEMCProxy;
 import net.minecraft.commands.CommandBuildContext;
@@ -60,7 +62,11 @@ public final class BeyondEmcCommands {
                                         .executes(ctx -> emcChange(ctx, false)))))
                 .then(Commands.literal("knowledge")
                         .then(Commands.literal("list").executes(BeyondEmcCommands::knowledgeList))
-                        .then(Commands.literal("clear").executes(BeyondEmcCommands::knowledgeClear))));
+                        .then(Commands.literal("clear").executes(BeyondEmcCommands::knowledgeClear)))
+                .then(Commands.literal("materialize")
+                        .then(Commands.literal("list").executes(BeyondEmcCommands::materializeList))
+                        .then(Commands.literal("rebuild").executes(BeyondEmcCommands::materializeRebuild))
+                        .then(Commands.literal("clear").executes(BeyondEmcCommands::materializeClear))));
     }
 
     // ------------------------------------------------------------------
@@ -128,6 +134,8 @@ public final class BeyondEmcCommands {
         lines.addAll(Phase3SelfTest.run(source.registryAccess()));
         lines.add("---- 兑换服务（阶段 4）----");
         lines.addAll(Phase4SelfTest.run());
+        lines.add("---- 物化：物品真实存在于网络中（0.3.0）----");
+        lines.addAll(MaterializeSelfTest.run(source.registryAccess()));
 
         boolean anyFailure = false;
         for (String line : lines) {
@@ -202,6 +210,80 @@ public final class BeyondEmcCommands {
         int before = NetKnowledgeStore.snapshot(net).size();
         NetKnowledgeStore.clear(net);
         source.sendSuccess(msg("已清空网络 " + net.getId() + " 的学习集合（原有 " + before + " 项）"), true);
+        return 1;
+    }
+
+    // ------------------------------------------------------------------
+    // 物化（0.3.0）
+    // ------------------------------------------------------------------
+
+    /**
+     * {@code /beyondemc materialize list} —— 列出物化条目的**当前真实内容**与**应然内容**。
+     *
+     * <p>两者都打印，因为"物化条目是否与权威数据一致"是这个功能最容易出问题的地方，
+     * 而这条命令是唯一能在实机上直接读出这件事的手段。
+     */
+    private static int materializeList(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        DimensionsNet net = requireNet(source);
+        if (net == null) {
+            return 0;
+        }
+
+        var current = ItemMaterializer.currentEntries(net);
+        var desired = ItemMaterializer.desiredEntries(net);
+
+        source.sendSuccess(msg("网络 " + net.getId() + " EMC=" + NetEmcAccessor.getEmc(net)
+                + "，物化条目 " + current.size() + " 类（应然 " + desired.size() + " 类）"), false);
+
+        int shown = 0;
+        for (var e : current.entrySet()) {
+            if (shown++ >= 30) {
+                source.sendSuccess(msg("…（其余 " + (current.size() - 30) + " 类已省略）"), false);
+                break;
+            }
+            long want = desired.getOrDefault(e.getKey(), 0L);
+            String mark = want == e.getValue() ? "" : "  ← 与应然不符（应然 " + want + "）";
+            source.sendSuccess(msg("  - " + e.getKey() + " ×" + e.getValue() + mark), false);
+        }
+        if (current.isEmpty()) {
+            source.sendSuccess(msg("  （当前没有任何物化条目）"), false);
+        }
+        return 1;
+    }
+
+    /**
+     * {@code /beyondemc materialize rebuild} —— 从权威数据（EMC + 学习集合 + 价格 + 真实库存）
+     * 重新推导全部物化条目。
+     *
+     * <p>这就是"物化条目是可随时丢弃重建的纯函数派生"的直接体现：先清空、再重算。
+     */
+    private static int materializeRebuild(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        DimensionsNet net = requireNet(source);
+        if (net == null) {
+            return 0;
+        }
+        int cleared = ItemMaterializer.clear(net);
+        ItemMaterializer.refresh(net);
+        int after = ItemMaterializer.currentEntries(net).size();
+        source.sendSuccess(msg("已按权威数据重建网络 " + net.getId() + " 的物化条目："
+                + "清掉 " + cleared + " 类，重建 " + after + " 类"), true);
+        return 1;
+    }
+
+    /** {@code /beyondemc materialize clear} —— 清空物化条目（等价于临时把 L1 熔断的动作用命令执行一次）。 */
+    private static int materializeClear(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        DimensionsNet net = requireNet(source);
+        if (net == null) {
+            return 0;
+        }
+        // 先撤掉所有已排队的刷新，否则刚清完就会被队列里的任务重建回来
+        ItemMaterializer.cancelPending(net);
+        int cleared = ItemMaterializer.clear(net);
+        source.sendSuccess(msg("已清空网络 " + net.getId() + " 的物化条目（" + cleared + " 类）。"
+                + "注意：任何一次 EMC 变化或打开界面都会按权威数据重新生成它们（这是设计如此）"), true);
         return 1;
     }
 

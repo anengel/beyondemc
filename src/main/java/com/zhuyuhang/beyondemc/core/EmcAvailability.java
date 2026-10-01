@@ -42,6 +42,13 @@ public final class EmcAvailability {
                 n,
                 IEMCProxy.INSTANCE.getValue(ItemInfo.fromItem(Items.DIAMOND)),
                 IEMCProxy.INSTANCE.getSellValue(ItemInfo.fromItem(Items.DIAMOND)));
+
+        // 触发点 ⑤（0.3.0）：同时覆盖两件事 ——
+        //   (a) 价格重映射（/reload 后单价变化，物化数量必须重算）；
+        //   (b) 读档后的修复（EMC 表只有到这里才就绪，因此"读档后修复"只能挂在这里，
+        //       挂 DimensionsNet.load 的 RETURN 是行不通的，见 ROADMAP-0.3.0.md 勘误 E4）。
+        // 放在最后：即便物化抛异常，也不会影响上面的 ready 置位与日志。
+        com.zhuyuhang.beyondemc.materialize.ItemMaterializer.refreshAll();
     }
 
     /** EMC 表是否已经至少完成过一次映射计算。 */

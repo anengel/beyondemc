@@ -25,6 +25,12 @@ public final class EmcRegistration {
         event.enqueueWork(() -> {
             StackKeyRegistry.registerType(EmcStackKey.INSTANCE);
             BeyondEmc.LOGGER.info("[BeyondEMC] 已注册 EMC 资源类型: {}", EmcStackKey.ID);
+
+            // 0.3.0：物化物品条目的资源类型。
+            // 与 EMC 池一样必须在这里（FMLCommonSetupEvent）注册 —— 晚了的话读档时
+            // StackKeyRegistry.getType(id) 找不到类型，BD 会把该类型的条目静默丢弃。
+            StackKeyRegistry.registerType(EmcItemKey.INSTANCE);
+            BeyondEmc.LOGGER.info("[BeyondEMC] 已注册物化物品资源类型: {}", EmcItemKey.ID);
         });
     }
 }

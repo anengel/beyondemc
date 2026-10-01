@@ -1,0 +1,75 @@
+// ---------------------------------------------------------------------------
+// BeyondEMC —— 仓库镜像前置脚本（本机网络受限时使用，不修改项目自身配置）
+//
+// 用法：
+//   tools\gradlew-here.cmd --init-script tools\mirrors.init.gradle compileJava
+//
+// 背景 / 为什么需要它
+//   构建 createMinecraftArtifacts 时，Gradle 需要解析一批"工具"依赖
+//   （例如 io.codechicken:DiffPatch）。若仓库列表里排在前面的上游仓库不可达，
+//   Gradle 的下载请求会长时间挂起 —— 症状很有迷惑性：
+//     构建没有任何输出、进程 CPU 几乎为零、一直不结束（看起来像"编译很慢"）。
+//   实测该 jar 在 Maven 中央仓库是存在的，只是没排到前面去尝试。
+//
+// 本脚本把可达的镜像插到【每个仓库列表的最前面】，让解析先命中镜像。
+// 只影响这一次命令行调用，不写入项目文件，可随时弃用。
+// ---------------------------------------------------------------------------
+
+def MIRROR_URLS = [
+        'https://maven.aliyun.com/repository/public',
+        'https://repo.huaweicloud.com/repository/maven/',
+]
+
+// 把镜像按 MIRROR_URLS 的顺序插到列表最前面。
+def prependMirrors = { handler ->
+    MIRROR_URLS.reverse().each { u ->
+        def repo = null
+        try {
+            repo = handler.maven { url = u }
+        } catch (Throwable t) {
+            return
+        }
+        try {
+            handler.remove(repo)
+            handler.add(0, repo)
+        } catch (Throwable ignored) {
+            // 该 handler 不支持下标插入：退化为"追加在末尾"，仍然可用。
+            // 必须先 remove 成功过才可能丢条目，所以这里补一次 add 确保它还在。
+            try {
+                handler.add(repo)
+            } catch (Throwable ignored2) {
+            }
+        }
+    }
+}
+
+// 1) 项目仓库：init script 的 allprojects 在项目创建时执行，
+//    早于 build.gradle 的 repositories {} 块。
+allprojects { p ->
+    prependMirrors(p.repositories)
+}
+
+// 2) 插件仓库 + settings 里声明的仓库
+settingsEvaluated { s ->
+    try {
+        prependMirrors(s.pluginManagement.repositories)
+    } catch (Throwable ignored) {
+    }
+    try {
+        prependMirrors(s.dependencyResolutionManagement.repositories)
+    } catch (Throwable ignored) {
+    }
+}
+
+// 3) 各 configuration 自己的仓库（moddev 插件给 neoFormRuntimeExternalTools
+//    单独挂过仓库，必须也把镜像插到它前面，否则照样会挂在不可达的上游上）
+gradle.projectsEvaluated {
+    allprojects { p ->
+        p.configurations.configureEach { c ->
+            try {
+                prependMirrors(c.repositories)
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+}

@@ -12,6 +12,7 @@ import com.zhuyuhang.beyondemc.core.LoadingGuard;
 import com.zhuyuhang.beyondemc.core.MintingGuard;
 import com.zhuyuhang.beyondemc.exchange.KnowledgeSyncNotifier;
 import com.zhuyuhang.beyondemc.knowledge.NetKnowledgeStore;
+import com.zhuyuhang.beyondemc.materialize.ItemMaterializer;
 import moze_intel.projecte.api.ItemInfo;
 import moze_intel.projecte.api.proxy.IEMCProxy;
 import net.minecraft.world.item.ItemStack;
@@ -148,6 +149,12 @@ public final class EmcDepositHandler implements UnifiedStorageBeforeInsertHandle
             BeyondEmc.LOGGER.info("[BeyondEMC] 折算：{} ×{} → {} EMC（回收单价 {}）",
                     info, tryInsert.amount(), emc, sell);
         }
+
+        // ---- 12. 触发点 ①：EMC 增加后重算物化条目（0.3.0）----
+        // ⚠️ 必须"延后"而不是就地刷新：此刻 EMC 【还没落库】—— 本钩子只能改插入内容，
+        // 真正的 insert 在返回之后才发生。scheduleRefresh 会把重算排到本 tick 结束之后，
+        // 那时 EMC 已经是终态（同一网络只排一次，连续存入不会放大成 N 次全量重算）。
+        ItemMaterializer.scheduleRefresh(net);
 
         // 返回 cancel=false + 换算后的 EMC 堆叠，让 BD 原生写入（自动持久化 + delta 广播）
         return new UnifiedStorageBeforeInsertHandler.BeforeInsertHandlerReturnInfo(

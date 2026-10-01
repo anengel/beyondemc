@@ -4,6 +4,7 @@ import com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet;
 import com.zhuyuhang.beyondemc.BeyondEmc;
 import com.zhuyuhang.beyondemc.emc.NetEmcAccessor;
 import com.zhuyuhang.beyondemc.knowledge.NetKnowledgeStore;
+import com.zhuyuhang.beyondemc.materialize.ItemMaterializer;
 import moze_intel.projecte.api.ItemInfo;
 import moze_intel.projecte.api.proxy.IEMCProxy;
 import net.minecraft.server.level.ServerPlayer;
@@ -181,6 +182,11 @@ public final class ExchangeService {
             return Result.fail("扣除 EMC 失败，请重试");
         }
 
+        // 触发点 ②（0.3.0）：余额变小 ⇒ 全部物化条目的数量必须一起收缩。
+        // 延后到 tick 之后执行：本方法后面还有"发放/退回"会再次改动状态，
+        // 排到终态之后重算一次即可（见 ItemMaterializer.scheduleRefresh 的说明）。
+        ItemMaterializer.scheduleRefresh(net);
+
         int given = 0;
         try {
             given = give(player, canonical, effective);
@@ -319,6 +325,9 @@ public final class ExchangeService {
             menu.setCarried(merged);
             // 立即推送一次，玩家不必等下一 tick 才看到（broadcastChanges 内会同步 carried）
             menu.broadcastChanges();
+
+            // 触发点 ②（0.3.0）：余额已减少 ⇒ 物化条目要跟着收缩
+            ItemMaterializer.scheduleRefresh(net);
 
             BeyondEmc.LOGGER.debug("[BeyondEMC] 吸附到鼠标：{} ×{} → 花费 {} EMC（单价 {}）",
                     info, capacity, spent, v.unitPrice());

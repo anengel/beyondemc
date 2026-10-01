@@ -28,8 +28,17 @@ import java.util.List;
  * 集合只在"存入新物品"时增长，而存入本身就会触发 BD 的存储 delta 同步、进而重建界面。
  * 打开界面这种低频场景下一次全量完全可接受；增量需要维护"自上次同步以来的变更集合"，
  * 属于典型的过早优化。
+ *
+ * <h2>0.3.0：为什么要带上 {@code serverMaterialized}</h2>
+ * 服务端开着物化时，"已学习但无库存"的物品已经是<b>服务端真实的存储条目</b>
+ * （{@code EmcItemKey}），客户端不该再注入一遍虚拟条目 —— 否则同一个物品会出现<b>两行</b>
+ * （{@code EmcItemKey} 行 + 客户端注入的 {@code ItemStackKey} 行）。
+ *
+ * <p>服务端配置没法直接读到客户端（远程客户端上 SERVER 配置不会加载），
+ * 所以由服务端随包把这个事实下发给客户端。
  */
-public record KnowledgeSyncPacket(int netId, List<LearnedEntry> learned) implements CustomPacketPayload {
+public record KnowledgeSyncPacket(int netId, List<LearnedEntry> learned, boolean serverMaterialized)
+        implements CustomPacketPayload {
 
     /** 一条已学习物品：身份 + 服务端算好的购买单价。 */
     public record LearnedEntry(ItemInfo info, long unitPrice) {
@@ -49,6 +58,7 @@ public record KnowledgeSyncPacket(int netId, List<LearnedEntry> learned) impleme
             StreamCodec.composite(
                     ByteBufCodecs.VAR_INT, KnowledgeSyncPacket::netId,
                     LearnedEntry.STREAM_CODEC.apply(ByteBufCodecs.list()), KnowledgeSyncPacket::learned,
+                    ByteBufCodecs.BOOL, KnowledgeSyncPacket::serverMaterialized,
                     KnowledgeSyncPacket::new);
 
     @Override
@@ -58,6 +68,7 @@ public record KnowledgeSyncPacket(int netId, List<LearnedEntry> learned) impleme
 
     /** 客户端处理：只写进纯数据缓存并置脏标记，不碰任何客户端类，双端加载安全。 */
     public static void handle(KnowledgeSyncPacket packet, IPayloadContext context) {
-        context.enqueueWork(() -> ClientKnowledgeCache.accept(packet.netId(), packet.learned()));
+        context.enqueueWork(() -> ClientKnowledgeCache.accept(
+                packet.netId(), packet.learned(), packet.serverMaterialized()));
     }
 }

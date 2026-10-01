@@ -25,11 +25,16 @@ import java.util.Map;
 public final class ClientKnowledgeCache {
 
     /**
-     * 一次同步的内容：网络 id + 该网络已学会的物品及其**服务端算好的购买单价**。
+     * 一次同步的内容：网络 id + 该网络已学会的物品及其**服务端算好的购买单价**
+     * + 服务端是否已开启物化。
      *
      * <p>用 {@link LinkedHashMap} 保持稳定顺序，让界面里虚拟条目的相对顺序可复现。
+     *
+     * @param serverMaterialized 服务端已开启物化（{@code materializeItems=true} 且模式为 STORAGE）。
+     *                           为 true 时客户端<b>不得</b>再注入虚拟条目 —— 那些物品已经是服务端
+     *                           真实的 {@code EmcItemKey} 条目，再注入会出两行。
      */
-    public record Entry(int netId, Map<ItemInfo, Long> learned) {
+    public record Entry(int netId, Map<ItemInfo, Long> learned, boolean serverMaterialized) {
     }
 
     private static volatile @Nullable Entry current = null;
@@ -48,12 +53,13 @@ public final class ClientKnowledgeCache {
     private ClientKnowledgeCache() {
     }
 
-    public static void accept(int netId, List<KnowledgeSyncPacket.LearnedEntry> learned) {
+    public static void accept(int netId, List<KnowledgeSyncPacket.LearnedEntry> learned,
+                             boolean serverMaterialized) {
         Map<ItemInfo, Long> map = new LinkedHashMap<>();
         for (KnowledgeSyncPacket.LearnedEntry e : learned) {
             map.put(e.info(), e.unitPrice());
         }
-        current = new Entry(netId, Collections.unmodifiableMap(map));
+        current = new Entry(netId, Collections.unmodifiableMap(map), serverMaterialized);
         dirty = true;
     }
 
@@ -70,7 +76,8 @@ public final class ClientKnowledgeCache {
         }
         Map<ItemInfo, Long> map = new LinkedHashMap<>(e.learned());
         map.put(entry.info(), entry.unitPrice());
-        current = new Entry(netId, Collections.unmodifiableMap(map));
+        // serverMaterialized 沿用当前值：它只由全量同步包设置
+        current = new Entry(netId, Collections.unmodifiableMap(map), e.serverMaterialized());
         dirty = true; // 交给 ClientKnowledgeRefresh 触发一次界面重建，新条目立刻出现
     }
 

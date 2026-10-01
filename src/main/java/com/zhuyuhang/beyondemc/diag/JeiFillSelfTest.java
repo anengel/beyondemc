@@ -47,7 +47,9 @@ public final class JeiFillSelfTest {
     }
 
     private static void learn(ItemInfo info, long unitPrice) {
-        ClientKnowledgeCache.accept(0, List.of(new KnowledgeSyncPacket.LearnedEntry(info, unitPrice)));
+        // 第三个参数 serverMaterialized=false：本自检模拟的是"客户端自己注入可用量"的场景，
+        // 与服务端物化条目无关（物化条目走的是另一条路径，见 VirtualEntryProvider.inject 的让位分支）。
+        ClientKnowledgeCache.accept(0, List.of(new KnowledgeSyncPacket.LearnedEntry(info, unitPrice)), false);
     }
 
     public static List<String> run() {

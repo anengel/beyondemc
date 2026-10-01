@@ -73,9 +73,16 @@ public final class NetKnowledgeStore {
         if (net == null) {
             return false;
         }
+        boolean added;
         synchronized (STORE) {
-            return STORE.computeIfAbsent(net, k -> new HashSet<>()).add(info);
+            added = STORE.computeIfAbsent(net, k -> new HashSet<>()).add(info);
         }
+        if (added) {
+            // 触发点 ④（0.3.0）：新学会的物品应当有对应的物化条目。
+            // 延后排到 tick 之后，与 EMC 落库的时序解耦（见 ItemMaterializer.scheduleRefresh）。
+            com.zhuyuhang.beyondemc.materialize.ItemMaterializer.scheduleRefresh(net);
+        }
+        return added;
     }
 
     public static boolean knows(@Nullable DimensionsNet net, @NotNull ItemInfo info) {

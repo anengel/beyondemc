@@ -24,6 +24,26 @@ public final class BeyondEmcConfig {
         ACTION_BAR
     }
 
+    /**
+     * 物化层的写入模式（0.3.0 的 L2 熔断）。
+     *
+     * <p>{@link #STORAGE} 是唯一的正常模式；另外两个是降级手段。
+     */
+    public enum MaterializeMode {
+        /** 写进 {@code UnifiedStorage}（默认）—— 条目真实存在、由 BD 自动持久化与同步。 */
+        STORAGE,
+        /**
+         * 只写网络 NBT、完全不碰 {@code UnifiedStorage}，风险面最小。
+         *
+         * <p>⚠️ <b>当前版本尚未实现</b>：它需要自己实现持久化 / 同步 / 网络合并 / 销毁的生命周期，
+         * 工作量非零（见 {@code ROADMAP-0.3.0.md} 勘误 E8）。选到它时行为等同 {@link #OFF}，
+         * 并在日志里明确告警。
+         */
+        LEDGER,
+        /** 完全不物化，且清空已有条目。 */
+        OFF
+    }
+
     public static final ModConfigSpec SPEC;
 
     private static final Server SERVER;
@@ -107,6 +127,38 @@ public final class BeyondEmcConfig {
     }
 
     // ------------------------------------------------------------------
+    // 物化（0.3.0）：让"已学习但无库存"的物品真实存在于网络存储里
+    // ------------------------------------------------------------------
+
+    /**
+     * 物化总开关（L1 熔断），默认<b>开启</b>。
+     *
+     * <p>开启时：已学习、买得起、且没有真实库存的物品会在网络存储里生成<b>真实条目</b>；
+     * 关闭时：下次 {@code ItemMaterializer.refresh} 会<b>清空</b>全部物化条目。
+     *
+     * <p>⚠️ 关掉它<b>不等于</b>回到 0.2 —— 物化条目是真实存储条目，BD 原生列表照样渲染它们，
+     * 所以必须真清空（见 {@code ROADMAP-0.3.0.md} 勘误 E1）。
+     */
+    public static boolean materializeItems() {
+        return get(() -> SERVER.materializeItems.get(), true);
+    }
+
+    /** 物化写入模式。见 {@link MaterializeMode}。 */
+    public static MaterializeMode materializeMode() {
+        return get(() -> SERVER.materializeMode.get(), MaterializeMode.STORAGE);
+    }
+
+    /**
+     * 物化条目数上限（默认 512）。
+     *
+     * <p>超出时按"价格升序 + 物品注册名"确定性取前 N。存在的理由：BD 界面列表有
+     * {@code getLines() * 9} 的硬上限（架构风险 R7），且条目数会放大同步包体积。
+     */
+    public static int maxMaterializedItems() {
+        return get(() -> SERVER.maxMaterializedItems.get(), 512);
+    }
+
+    // ------------------------------------------------------------------
 
     /** 配置未加载时回落到默认值，绝不让配置读取把调用方炸掉。 */
     private static <T> T get(java.util.function.Supplier<T> supplier, T fallback) {
@@ -128,6 +180,9 @@ public final class BeyondEmcConfig {
         public final ModConfigSpec.LongValue maxExchangePerClick;
         public final ModConfigSpec.BooleanValue allowInterfaceWithdraw;
         public final ModConfigSpec.EnumValue<FeedbackMode> exchangeFeedback;
+        public final ModConfigSpec.BooleanValue materializeItems;
+        public final ModConfigSpec.EnumValue<MaterializeMode> materializeMode;
+        public final ModConfigSpec.IntValue maxMaterializedItems;
 
         @SuppressWarnings("unchecked")
         Server(ModConfigSpec.Builder builder) {
@@ -174,6 +229,26 @@ public final class BeyondEmcConfig {
                     .comment("兑换成功后的提示方式：NONE（默认，不提示）/ CHAT（聊天栏）/ ACTION_BAR（快捷栏上方）。",
                             "失败提示始终走聊天栏，不受此项影响。")
                     .defineEnum("exchangeFeedback", FeedbackMode.NONE);
+            builder.pop();
+
+            builder.comment("物化（0.3.0）：让\"已学习但无库存\"的物品真实存在于网络存储里")
+                    .push("materialize");
+            materializeItems = builder
+                    .comment("总开关（默认 true）。",
+                            "true：已学习、买得起、且没有真实库存的物品会在网络存储里生成【真实条目】，",
+                            "  数量 = 逐件 floor(网络EMC ÷ 购买价)（与界面原有的显示口径一致，各物品彼此独立）。",
+                            "false：清空全部物化条目，回到 0.2 的行为（由客户端的虚拟条目注入兜底）。",
+                            "注意：物化条目是真实存储条目，所以关闭时必须【真清空】而不只是忽略。")
+                    .define("materializeItems", true);
+            materializeMode = builder
+                    .comment("写入模式：STORAGE（默认，写进网络存储，由 BD 自动持久化与同步）",
+                            "          / LEDGER（只写网络 NBT，不碰存储；当前版本尚未实现，行为等同 OFF，会记警告）",
+                            "          / OFF（不物化且清空条目）。")
+                    .defineEnum("materializeMode", MaterializeMode.STORAGE);
+            maxMaterializedItems = builder
+                    .comment("物化条目数上限（默认 512）。超出时按\"价格升序 + 物品注册名\"确定性取前 N。",
+                            "存在的理由：BD 界面列表有 getLines()*9 的硬上限，且条目数会放大同步包体积。")
+                    .defineInRange("maxMaterializedItems", 512, 1, 100000);
             builder.pop();
         }
     }

@@ -22,6 +22,15 @@ setlocal
 set "JAVA_HOME=C:\Program Files\Java\jdk-21.0.12.1"
 set "PATH=%JAVA_HOME%\bin;%PATH%"
 
+REM Reuse the Gradle cache that already lives inside this project.
+REM play.cmd does exactly the same. This is NOT cosmetic:
+REM without it Gradle falls back to %USERPROFILE%\.gradle, which is NOT the
+REM cache this project uses -- it has to re-download ~1.6 GB of
+REM NeoForge/Minecraft artifacts. While that download runs the build prints
+REM NOTHING for many minutes and looks hung, because it is actually stuck
+REM waiting on a dependency HTTP request rather than compiling.
+set "GRADLE_USER_HOME=%~dp0..\.gradle-home"
+
 if not exist "%JAVA_HOME%\bin\javac.exe" (
     echo [BeyondEMC] ERROR: no JDK found at "%JAVA_HOME%"
     echo             Edit JAVA_HOME in tools\gradlew-here.cmd

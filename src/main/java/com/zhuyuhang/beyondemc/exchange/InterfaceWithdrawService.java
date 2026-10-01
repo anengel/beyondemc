@@ -3,6 +3,7 @@ package com.zhuyuhang.beyondemc.exchange;
 import com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet;
 import com.wintercogs.beyonddimensions.api.dimensionnet.UnifiedStorage;
 import com.wintercogs.beyonddimensions.api.dimensionnet.helper.UnifiedStorageBeforeExtractHandler;
+import com.wintercogs.beyonddimensions.api.storage.key.IStackKey;
 import com.wintercogs.beyonddimensions.api.storage.key.KeyAmount;
 import com.wintercogs.beyonddimensions.api.storage.key.impl.ItemStackKey;
 import com.zhuyuhang.beyondemc.BeyondEmc;
@@ -11,8 +12,11 @@ import com.zhuyuhang.beyondemc.core.EmcAvailability;
 import com.zhuyuhang.beyondemc.core.ExtractContext;
 import com.zhuyuhang.beyondemc.core.MintingGuard;
 import com.zhuyuhang.beyondemc.emc.EmcDepositHandler;
+import com.zhuyuhang.beyondemc.emc.EmcItemKey;
 import com.zhuyuhang.beyondemc.emc.NetEmcAccessor;
 import com.zhuyuhang.beyondemc.knowledge.NetKnowledgeStore;
+import com.zhuyuhang.beyondemc.materialize.ItemMaterializer;
+import com.zhuyuhang.beyondemc.materialize.MaterializingGuard;
 import moze_intel.projecte.api.ItemInfo;
 import moze_intel.projecte.api.proxy.IEMCProxy;
 import net.minecraft.world.item.ItemStack;
@@ -61,6 +65,19 @@ import org.jetbrains.annotations.NotNull;
  *       （`NetInterfaceAccess.java:120` 对空过滤器直接 `continue`），
  *       且每个槽位每周期最多取一整堆（`getVanillaMaxStackSize()`）。</li>
  * </ul>
+ *
+ * <h2>0.3.0：对物化条目（{@code EmcItemKey}）的"改道收费"</h2>
+ * 物化条目落进真实存储后，BD 的三条抽取入口（按槽位 / 按标签 / 按键）都会汇聚到本钩子
+ * （{@code UnifiedStorage.java:105-143}），而存储会把 {@code key.getTags()} 全登记进
+ * {@code tag2stackMap}（{@code AbstractUnorderedStackHandler.java:736-738}）——
+ * 于是物化条目可被 {@code extract(TagKey,…)} 命中。
+ *
+ * <p>本钩子原先对非 {@code ItemStackKey} 一律 {@code pass}，那会让"按标签 / 按槽位抽物化条目"
+ * 变成<b>零扣费交付</b>（真实刷物品入口）。现在把 {@code EmcItemKey} <b>归一成"该物品"</b>，
+ * 复用下面同一条收费铸造链路：有 EMC 价值就扣费；余额不足或无法定价一律 {@code cancel}。
+ *
+ * <p>唯一的例外是 {@link MaterializingGuard} 激活时（物化层正在维护自己的派生数据）—— 必须放行，
+ * 否则条目无法收缩（自锁）。
  */
 public final class InterfaceWithdrawService {
 
@@ -103,31 +120,66 @@ public final class InterfaceWithdrawService {
             probeSawSimulate = ExtractContext.isSimulate();
         }
 
+        // ---- 0. 物化层自身的维护：必须放行 ----
+        // ItemMaterializer 收缩/清空物化条目用的就是 storage.extract(EmcItemKey,…)，
+        // 那是"派生层在维护自己"，不是外部取用。若不放行会被下面的改道逻辑当成外部抽取：
+        // 要么凭空扣钱，要么因余额不足被 cancel —— 条目永远无法收缩（自锁）。
+        IStackKey<?> rawKey = tryExtract.key();
+        boolean materialized = rawKey instanceof EmcItemKey;
+        if (materialized && MaterializingGuard.isActive()) {
+            return pass(tryExtract);
+        }
+
         // ---- 1. 前置与守卫 ----
         if (net == null) {
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
         if (!BeyondEmcConfig.allowInterfaceWithdraw()) {
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
-        // ⚠️ 模拟抽取绝不扣费（外部模组的能力查询会大量走这里）
+        // ⚠️ 模拟抽取绝不扣费（外部模组的能力查询会大量走这里）。
+        // 必须排在"改道"之前 —— 这是 0.2 立下的红线，0.3 不得破坏。
         if (ExtractContext.isSimulate()) {
             return pass(tryExtract);
         }
-        if (!(tryExtract.key() instanceof ItemStackKey itemKey)) {
+
+        // ---- 1b. 键归一（0.3.0 的"改道收费"）----
+        // 物化条目落进真实存储后，BD 的三条抽取入口（按槽位 / 按标签 / 按键）都会汇聚到这里
+        // （UnifiedStorage.java:105-143），而存储又把 key.getTags() 全登记进 tag2stackMap
+        // （AbstractUnorderedStackHandler.java:736-738）⇒ 物化条目可被 extract(TagKey,…) 命中。
+        // 若这里对 EmcItemKey 直接放行，就是【零扣费交付】—— 真实刷物品入口。
+        // 所以把 EmcItemKey 归一成"该物品"，走下面同一条收费铸造链路：
+        // "抽物化条目"与"抽该物品"是同一个语义，只是入口键类型不同。
+        ItemStackKey itemKey;
+        if (rawKey instanceof ItemStackKey k) {
+            itemKey = k;
+        } else if (rawKey instanceof EmcItemKey emcItemKey) {
+            try {
+                ItemStack raw = emcItemKey.info().createStack();
+                if (raw.isEmpty()) {
+                    return cancel(tryExtract); // 身份都取不出来 ⇒ 什么都不交付
+                }
+                itemKey = new ItemStackKey(raw);
+            } catch (Throwable t) {
+                BeyondEmc.LOGGER.error("[BeyondEMC] 物化条目身份归一失败，已拒绝此次抽取", t);
+                return cancel(tryExtract);
+            }
+        } else {
             return pass(tryExtract); // 流体/能量/EMC 自身等，交给 BD 原生
         }
+
         ItemStack stack = itemKey.getReadOnlyStack();
         if (stack.isEmpty()) {
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
 
         UnifiedStorage storage = net.getUnifiedStorage();
         if (storage == null) {
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
-        // 有真实库存 → 原生抽取（需求 R6 的同一原则）
-        if (storage.hasStack(itemKey)) {
+        // 有真实库存 → 原生抽取（需求 R6 的同一原则）。
+        // 物化路径不能走这条：放行等于把 EmcItemKey 交给 super.extract 零扣费取走。
+        if (!materialized && storage.hasStack(itemKey)) {
             return pass(tryExtract);
         }
 
@@ -138,12 +190,12 @@ public final class InterfaceWithdrawService {
         // 早先的漏洞正是因为两条路径各自判断、标准不一致。
         String skip = EmcDepositHandler.skipReason(stack);
         if (skip != null) {
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
 
         // ---- 3. EMC 表未就绪不兑换 ----
         if (!EmcAvailability.isReady()) {
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
 
         // ---- 4. 身份归一 + 一致性 ----
@@ -152,21 +204,22 @@ public final class InterfaceWithdrawService {
         // 否则就会"按普通剑的价格铸出附魔剑"，也就是刷物品。
         CanonicalExchange.Resolved resolved = CanonicalExchange.resolve(stack);
         if (resolved == null) {
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
         ItemInfo info = resolved.info();
         ItemStackKey canonicalKey = new ItemStackKey(resolved.stack());
         if (!canonicalKey.equals(itemKey)) {
             logThrottled("过滤器里的物品与网络学会的身份不一致，已拒绝铸造（防止按低价换出高价物品）");
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
-        // 有真实库存 → 交给原生抽取（需求 R6 的同一原则）
-        if (storage.hasStack(canonicalKey)) {
+        // 有真实库存 → 交给原生抽取（需求 R6 的同一原则）；物化路径同样不能放行
+        if (!materialized && storage.hasStack(canonicalKey)) {
             return pass(tryExtract);
         }
 
         if (BeyondEmcConfig.exchangeRequiresKnowledge() && !NetKnowledgeStore.knows(net, info)) {
-            return pass(tryExtract); // 未学习 → 原样放行，原生抽取自然返回 0
+            // 未学习：原生路径放行（原生抽取自然返回 0）；物化路径则明确拒绝，绝不白给
+            return deny(materialized, tryExtract);
         }
 
         // ---- 4. 定价与余额 ----
@@ -174,10 +227,11 @@ public final class InterfaceWithdrawService {
         try {
             unitPrice = IEMCProxy.INSTANCE.getValue(info); // 购买价
         } catch (Throwable t) {
-            return pass(tryExtract);
+            return deny(materialized, tryExtract);
         }
         if (unitPrice <= 0L) {
-            return pass(tryExtract); // 该物品当前没有 EMC 价值
+            // 物化路径**不沿用**原生路径的"放行"写法 —— 那会留下零扣费交付的口子
+            return deny(materialized, tryExtract);
         }
 
         long balance = NetEmcAccessor.getEmc(net);
@@ -218,10 +272,15 @@ public final class InterfaceWithdrawService {
 
             long seq = ++logCount;
             if (seq <= LOG_FIRST_N) {
-                BeyondEmc.LOGGER.info("[BeyondEMC] 接口兑换：{} ×{} → 扣除 {} EMC（单价 {}，网络 {}）",
+                BeyondEmc.LOGGER.info("[BeyondEMC] 接口兑换：{} ×{} → 扣除 {} EMC（单价 {}，网络 {}{}）",
                         info, minted, NetEmcAccessor.saturatingMultiply(unitPrice, minted),
-                        unitPrice, net.getId());
+                        unitPrice, net.getId(), materialized ? "，来源=物化条目" : "");
             }
+
+            // 触发点 ③（0.3.0）：余额已减少 ⇒ 物化条目要跟着收缩。
+            // 延后到 tick 之后：此刻刚铸造的物品还没被下面的 super.extract 取走。
+            ItemMaterializer.scheduleRefresh(net);
+
             // 交给随后的 super.extract(...) 取走刚铸造出来的物品
             return new UnifiedStorageBeforeExtractHandler.BeforeExtractHandlerReturnInfo(
                     new KeyAmount(canonicalKey, minted), false);
@@ -239,6 +298,23 @@ public final class InterfaceWithdrawService {
 
     private static UnifiedStorageBeforeExtractHandler.BeforeExtractHandlerReturnInfo cancel(KeyAmount current) {
         return new UnifiedStorageBeforeExtractHandler.BeforeExtractHandlerReturnInfo(current, true);
+    }
+
+    /**
+     * "这条路径无法交付"时的返回。
+     *
+     * <p>两种键<b>必须区别对待</b>，这是 INV-1′ 的关键：
+     * <ul>
+     *   <li>{@code ItemStackKey}（原生路径）：{@code pass} —— 让 BD 原生去抽，抽不到自然是 0，
+     *       行为与 0.2 完全一致；</li>
+     *   <li>{@code EmcItemKey}（物化条目）：{@code cancel} —— 因为 {@code pass} 会把
+     *       EmcItemKey 原样交给 {@code super.extract} <b>零扣费取走</b>。
+     *       按用户拍板的口径：<b>有 EMC 价值就扣费，余额不足或无法定价就一律拒绝（不交半份）</b>。</li>
+     * </ul>
+     */
+    private static UnifiedStorageBeforeExtractHandler.BeforeExtractHandlerReturnInfo deny(boolean materialized,
+                                                                                         KeyAmount current) {
+        return materialized ? cancel(current) : pass(current);
     }
 
     private static void logThrottled(String format, Object... args) {

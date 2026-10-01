@@ -95,6 +95,15 @@ public final class VirtualEntryProvider {
             return;
         }
 
+        // ---- 0.3.0：服务端已开启物化时，客户端不再注入 ----
+        // 因为那些物品已经是服务端真实的 EmcItemKey 存储条目（会随 BD 的 delta 同步下来），
+        // 再注入一遍 ItemStackKey 虚拟行就会【同一个物品出两行】。
+        // 判据来自服务端下发的权威标志（远程客户端读不到服务端配置）。
+        if (entry.serverMaterialized()) {
+            logThrottled("注入跳过：服务端已开启物化，条目由服务端真实持有（客户端不再注入虚拟条目）");
+            return;
+        }
+
         ClientNetStorageAccessor accessor = (ClientNetStorageAccessor) (Object) view;
 
         // ⚠️⚠️ 本方法里【所有】"库存/余额"查询都必须读 real（sourceStorage），
