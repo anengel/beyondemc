@@ -9,12 +9,12 @@
 | 模组名 | Beyond EMC |
 | mod id | `beyondemc` |
 | 包名 | `com.zhuyuhang.beyondemc` |
-| 版本 | `0.1.0`（未发布） |
+| 版本 | `0.3.2`（开发中；最近发布为 `0.3.1`，tag `v0.3.1` → `2e5b8e3`） |
 | 作者 | ZhuYuhang |
 | 许可证 | MIT（与两个前置模组一致；`LICENSE` 已放入工程根，构建时打进 jar 的 `META-INF`） |
 | Minecraft | `1.21.1` |
-| NeoForge（编译基线） | `21.1.234`（与 Beyond Dimensions 一致） |
-| NeoForge（依赖下界） | `[21.1.194,)`（BD 与 ProjectE 中更严者） |
+| NeoForge（编译基线） | `21.1.249`（与使用者实机一致；**不是** `21.1.234` —— JEI `19.44.0.401` 要求 `>= 21.1.238`，用 21.1.234 会让 dev 端 run 崩在模组加载阶段） |
+| NeoForge（依赖下界） | `[21.1.194,)`（BD 与 ProjectE 中更严者；装了 JEI 时实际下界是 `21.1.238`） |
 | Java | `21` |
 | 本机 JDK | `C:\Program Files\Java\jdk-21.0.12.1`（**未进 PATH，需显式指定**，用 `tools\gradlew-here.cmd`） |
 | ModDevGradle | `2.0.116`（与 Beyond Dimensions 一致） |
@@ -131,3 +131,6 @@ dependencies {
 | 资料整理时 | 建立基线 | — |
 | 2026-09-27 | 阶段 1–7 完成；新增网络接口兑换（抽取钩子）、修复刷物品漏洞 | 新版 API 锚点见上表；`UnifiedStorageBeforeExtractHandler` 由"未采用"改为"已采用" |
 | 2026-09-27 | 加入模组图标 `src/main/resources/beyondemc.png`（256×256），并在 `mods.toml` 里配 `logoFile` | 无 API 影响 |
+| 2026-10-01 | 0.3.0 发布（物化：物品真实存在于维度网络） → 版本 `0.3.0`，tag `v0.3.0` → `e1d0958` | 新增自定义键类型 `EmcItemKey` / `EmcItemType` |
+| 2026-10-01 | 0.3.1 发布（自检覆盖 BD 三条抽取入口，关闭 Spike `S-0.3-7`） → 版本 `0.3.1`，tag `v0.3.1` → `2e5b8e3` | 不改游玩行为；`mod_version` = `0.3.1` |
+| 2026-10-01 | 0.3.2：Create（机械动力）集成与「第三方可见化」 → 版本 `0.3.2` | 新增 `-PwithCreate` 可选依赖接线、`create_version` 属性、`beyondemc.create.mixins.json`；Mixin `ItemUnifiedStorageHandler`（无序能力桥，**有序版刻意不动**）。详见 `docs/plan/CREATE-INTEGRATION.md` |
