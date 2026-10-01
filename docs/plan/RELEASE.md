@@ -200,7 +200,7 @@ tools\play.cmd build
 
 产物：`build/libs/beyondemc-1.21.1-neoforge-<版本>.jar`
 
-**产物已核实的内容**（阶段 7 审计）：
+**产物已核实的内容**（阶段 7 首次审计；**2026-10-01 针对 0.3.2 产物重新逐项核对**）：
 
 | 检查 | 结果 |
 |---|---|
@@ -209,7 +209,9 @@ tools\play.cmd build
 | `META-INF/neoforge.mods.toml` | ✅ 存在，`modId`/`version`/`displayName`/`authors`/`license` 齐全 |
 | `META-INF/LICENSE` | ✅ 存在（MIT 要求保留版权声明） |
 | `beyondemc.png` | ✅ 存在（5364 字节），且 `logoFile` 指向它；实测服务器启动无元数据解析错误 |
-| `beyondemc.mixins.json` | ✅ 在 jar 根，`mixins` 5 个 + `client` 1 个 |
+| `beyondemc.mixins.json` | ✅ 在 jar 根，`mixins` **6** 个（0.3.2 新增 `ItemUnifiedStorageHandlerMixin`）+ `client` 1 个 |
+| `beyondemc.jei.mixins.json` / `beyondemc.create.mixins.json` | ✅ 均在 jar 根，`required=false` + 各自的 `plugin`（`BeyondEmcJeiMixinPlugin` / `BeyondEmcCreateMixinPlugin`）。JEI 的 1 个混入在 `client` 段（JEI 是客户端模组），Create 的 1 个在 `mixins` 段（目标类不分端侧） |
+| `mods.toml` 的 `[[mixins]]` | ✅ 三段齐全（`beyondemc` / `.jei.` / `.create.`）；`version="0.3.2"`；`create` 声明为 `optional` + `[6.0.10,)` + `AFTER` + `BOTH` |
 | 中英文语言文件 | ✅ 均在 |
 | `config/beyondemc-server.toml` | ➖ 不在 jar 里 —— **正确**，配置文件由 NeoForge 首次启动时生成 |
 
