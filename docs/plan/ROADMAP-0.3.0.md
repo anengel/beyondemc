@@ -429,6 +429,21 @@ Copy-Item ..\mod-learn\backups\deps\*.jar libs\
 tools\gradlew-here.cmd build
 ```
 
+### 9.4b 0.3.0 之后的回退（更常用）
+
+0.3.0 已发版，因此以后最常见的回退是「**0.3.x 改崩了 → 退回 0.3.0**」，而不是退回 0.2：
+
+```powershell
+cd C:\mc\mcwj\mod-learn
+git switch -c try/<改崩的分支>      # 先保住现场
+git switch main
+git reset --hard v0.3.0            # 源码回到 0.3.0
+tools\gradlew-here.cmd build       # 重新出 jar
+# 再把 backups\beyondemc-1.21.1-neoforge-0.3.0.jar 放回 mods\ 替换掉坏的那份
+```
+> `v0.3.0` 是**附注 tag**，`git switch --detach v0.3.0` 也能直接落到发布点，不会丢东西。
+> 若连仓库都没了：`git clone backups\beyondemc-0.3.0.bundle beyondemc-restored`（已真克隆演练通过）。
+
 ### 9.5 本轮已落实的备份与版本管理（可核验）
 
 | 项 | 状态 | 证据 |
@@ -443,9 +458,14 @@ tools\gradlew-here.cmd build
 | `backups/deps/`（两个前置 jar，不在 git 里） | ✅ 就位 | `beyonddimensions-1.21.1-0.7.30.jar`、`projecte-1.21.1-1.1.0.jar` |
 | `backups/beyondemc-0.3-baseline.bundle` | ✅ **本轮新建** | 演练：HEAD `d30cbff`、15 提交、93 文件、工作树干净 |
 | `backups/beyondemc-0.3-baseline-source.zip` | ✅ **本轮新建** | SHA-256 `72e2b7a7…` |
+| tag `v0.3.0`（附注 tag → `e1d0958`） | ✅ **本轮新建** | `git rev-parse 'v0.3.0^{commit}'` = `e1d0958` |
+| `backups/beyondemc-0.3.0.bundle` | ✅ **本轮新建** | 演练：HEAD `e1d0958`、16 提交、三个 tag 全在、102 文件、工作树干净（真克隆到临时目录跑完再删） |
+| `backups/beyondemc-0.3.0-source.zip` | ✅ **本轮新建** | SHA-256 `44200F05…` |
+| `backups/beyondemc-1.21.1-neoforge-0.3.0.jar` | ✅ **本轮新建** | SHA-256 `C235AC96…` |
+| `backups/本地开发环境参考手册.md` | ✅ **本轮新建** | 手工复制（该文件未跟踪，bundle/archive 拿不到）；SHA-256 `d476b6e4…` |
 
 > **纪律**：每个阶段结束、以及每次做有风险的改动之前，重新跑一遍备份并**真克隆一次**（`docs/plan/ROADMAP.md` §6 与项目根 `MC-MOD-GUIDE.md` §6）。没演练过的备份不算备份。
-> **未跟踪项**：`本地开发环境参考手册.md` 当前为未跟踪状态 ⇒ **不在任何 zip/bundle 里**，需先 `git add` 才能纳入备份。
+> **`本地开发环境参考手册.md` 的处理结论**：它含本机私有路径（含 `C:\Users\朱雨杭\.ssh\id_ed25519`，并注明"无密码短语"），而仓库将来要推到 GitHub ⇒ **决定不纳入 git**，改为在 `backups/` 里手工存一份磁盘兜底（已做，校验和一致）。因此它是唯一「有备份、但不在任何 bundle 里」的文件。
 
 ### 9.6 逐阶段的失败保护动作
 

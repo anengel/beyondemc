@@ -7,7 +7,7 @@
 存入时有 EMC 价值的物品会**自动折算成网络 EMC**，并在网络界面或自动化接口里随时兑换回来。
 网络拥有一份**自己的、与玩家个人转换台无关的**已学习物品集合。
 
-**Minecraft** 1.21.1 · **NeoForge** 21.1.234+ · 许可证 MIT
+**Minecraft** 1.21.1 · **NeoForge** 21.1.249 · 许可证 MIT
 
 ---
 
@@ -31,17 +31,21 @@
 | 组件 | 版本 | 说明 |
 |---|---|---|
 | Minecraft | `1.21.1` | |
-| NeoForge | `21.1.234` 或更高（≥ `21.1.194`） | 模组加载器 |
+| NeoForge | `21.1.249`（最低 `21.1.238`，装 JEI 时） | 模组加载器，见下方说明 |
 | **Beyond Dimensions**（超越维度） | `0.7.30` 或更高 | **必需前置** |
 | **ProjectE**（等价交换） | `1.1.0` 或更高 | **必需前置** |
 
 > 两个前置模组都**不会**随本模组一起分发，需要你自行安装。
 
+**关于 NeoForge 版本**：本模组的代码声明只需 `21.1.194` 以上，但**实际游玩不要低于 `21.1.238`**——
+配套的 JEI `19.44.0.401` 自己要求 `NeoForge >= 21.1.238`，低于它游戏会在模组加载阶段直接崩并报
+`Mod jei requires neoforge 21.1.238 or above`。本项目的开发与验证环境统一为 `21.1.249`（见 `gradle.properties`）。
+
 ---
 
 ## 安装
 
-1. 安装 **NeoForge 21.1.234+**（用官方 installer）。
+1. 安装 **NeoForge 21.1.249**（用官方 installer；最低不要低于 `21.1.238`，原因见上一节）。
 2. 下载并安装两个前置模组，放进 `mods/` 目录：
    - **Beyond Dimensions** —— 见其 [CurseForge](https://www.curseforge.com/minecraft/mc-mods/beyond-dimensions) 页面
    - **ProjectE** —— 见其 [CurseForge](https://www.curseforge.com/minecraft/mc-mods/projecte) 页面
